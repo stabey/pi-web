@@ -56,17 +56,21 @@ const child = spawn(process.execPath, [nextBin, ...nextArgs], {
 });
 
 let browserOpened = false;
-const url = `http://${hostname ?? "localhost"}:${port}`;
+const openBrowser = process.env.PI_WEB_OPEN_BROWSER !== "false";
+const browserHost = !hostname || hostname === "0.0.0.0" || hostname === "::" ? "localhost" : hostname;
+const url = `http://${browserHost}:${port}`;
 
 child.stdout.on("data", (chunk) => {
   const text = chunk.toString();
   process.stdout.write(text);
-  if (!browserOpened && text.includes("Ready")) {
+  if (openBrowser && !browserOpened && text.includes("Ready")) {
     browserOpened = true;
     const isWindows = process.platform === "win32";
     const isMac = process.platform === "darwin";
     const openCmd = isWindows ? "start" : isMac ? "open" : "xdg-open";
-    spawn(openCmd, [url], { shell: isWindows, stdio: "ignore", detached: true }).unref();
+    const opener = spawn(openCmd, [url], { shell: isWindows, stdio: "ignore", detached: true });
+    opener.on("error", () => {});
+    opener.unref();
   }
 });
 

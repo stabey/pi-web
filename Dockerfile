@@ -70,6 +70,7 @@ ENV PI_CODING_AGENT_DIR=/data/pi-agent
 ENV PI_WEB_CHAT_ROOT=/data/chat
 ENV PI_WEB_WORKSPACE_ROOTS=/data/workspaces
 ENV PI_WEB_UPLOAD_ROOT=/data/uploads
+ENV PI_WEB_OPEN_BROWSER=false
 
 EXPOSE 30141
 
