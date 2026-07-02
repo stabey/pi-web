@@ -162,6 +162,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [modelSearch, setModelSearch] = useState("");
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
@@ -564,10 +565,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       name,
     })).sort(compareModelOptions);
   })();
+  const modelSearchText = modelSearch.trim().toLowerCase();
+  const filteredModelOptions = modelSearchText
+    ? modelOptions.filter((opt) => (
+      opt.name.toLowerCase().includes(modelSearchText) ||
+      opt.modelId.toLowerCase().includes(modelSearchText) ||
+      opt.provider.toLowerCase().includes(modelSearchText)
+    ))
+    : modelOptions;
 
   // Group options by provider, preserving insertion order
   const modelsByProvider: { provider: string; options: ModelOption[] }[] = [];
-  for (const opt of modelOptions) {
+  for (const opt of filteredModelOptions) {
     const group = modelsByProvider.find((g) => g.provider === opt.provider);
     if (group) group.options.push(opt);
     else modelsByProvider.push({ provider: opt.provider, options: [opt] });
@@ -593,6 +602,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     return thinkingLevelMap[lvl] ?? lvl;
   })();
   const toolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "coding-readonly"))?.[0] ?? "read";
+
+  useEffect(() => {
+    if (!modelDropdownOpen) setModelSearch("");
+  }, [modelDropdownOpen]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1074,46 +1087,60 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       borderRadius: 8, boxShadow: "0 -4px 16px rgba(0,0,0,0.10)",
                       overflow: "hidden", maxHeight: maxH, overflowY: "auto",
                       }}>
-                      {modelsByProvider.map((group, gi) => (
-                        <div key={group.provider}>
-                          {(modelsByProvider.length > 1) && (
-                            <div style={{
-                              padding: "6px 12px 4px",
-                              fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
-                              textTransform: "uppercase", letterSpacing: "0.07em",
-                              borderTop: gi > 0 ? "1px solid var(--border)" : "none",
-                            }}>
-                              {group.provider}
-                            </div>
-                          )}
-                          {group.options.map((opt) => {
-                            const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
-                            return (
-                              <button
-                                key={`${opt.provider}:${opt.modelId}`}
-                                onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 8,
-                                  width: "100%", padding: "7px 12px",
-                                  background: isActive ? "var(--bg-selected)" : "none",
-                                  border: "none",
-                                  color: isActive ? "var(--text)" : "var(--text-muted)",
-                                  cursor: "pointer", fontSize: 12, textAlign: "left",
-                                  fontWeight: isActive ? 600 : 400,
-                                  whiteSpace: "nowrap",
-                                }}
-                                onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
-                                onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
-                              >
-                                {isActive
-                                  ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
-                                  : <span style={{ width: 10, flexShrink: 0 }} />}
-                                {opt.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 10px", borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-dim)", flexShrink: 0 }}>
+                          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                        <input
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                          placeholder={`Search ${modelOptions.length} models...`}
+                          autoFocus
+                          style={{ minWidth: 180, flex: 1, border: "none", outline: "none", background: "transparent", color: "var(--text)", fontSize: 12 }}
+                        />
+                      </div>
+                      {modelsByProvider.length === 0 ? (
+                        <div style={{ padding: "16px 12px", color: "var(--text-dim)", fontSize: 12, textAlign: "center" }}>No models match</div>
+                      ) : modelsByProvider.map((group, gi) => (
+                          <div key={group.provider}>
+                            {(modelsByProvider.length > 1) && (
+                              <div style={{
+                                padding: "6px 12px 4px",
+                                fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
+                                textTransform: "uppercase", letterSpacing: "0.07em",
+                                borderTop: gi > 0 ? "1px solid var(--border)" : "none",
+                              }}>
+                                {group.provider}
+                              </div>
+                            )}
+                            {group.options.map((opt) => {
+                              const isActive = opt.modelId === model?.modelId && opt.provider === model?.provider;
+                              return (
+                                <button
+                                  key={`${opt.provider}:${opt.modelId}`}
+                                  onClick={() => { setModelDropdownOpen(false); if (!isActive || isAutoModelSelection) onModelChange(opt.provider, opt.modelId); }}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 8,
+                                    width: "100%", padding: "7px 12px",
+                                    background: isActive ? "var(--bg-selected)" : "none",
+                                    border: "none",
+                                    color: isActive ? "var(--text)" : "var(--text-muted)",
+                                    cursor: "pointer", fontSize: 12, textAlign: "left",
+                                    fontWeight: isActive ? 600 : 400,
+                                    whiteSpace: "nowrap",
+                                  }}
+                                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = "none"; }}
+                                >
+                                  {isActive
+                                    ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
+                                    : <span style={{ width: 10, flexShrink: 0 }} />}
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{opt.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ))}
                     </div>
                     );
                   })()}

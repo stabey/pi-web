@@ -20,6 +20,7 @@ interface Props {
   onAtMention?: (relativePath: string) => void;
   mode?: AgentMode;
   chatCwd?: string | null;
+  onOpenWorkspaceManager?: () => void;
 }
 
 interface WorkspaceInfo {
@@ -205,7 +206,7 @@ function PiAgentTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, mode = "coding", chatCwd }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, mode = "coding", chatCwd, onOpenWorkspaceManager }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -269,7 +270,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       .then((r) => r.json())
       .then((d: { workspaces?: WorkspaceInfo[] }) => setWorkspaces(d.workspaces ?? []))
       .catch(() => setWorkspaces([]));
-  }, [mode]);
+  }, [mode, refreshKey]);
+
+  useEffect(() => {
+    if (mode === "coding" && selectedCwdProp && selectedCwdProp !== selectedCwd) {
+      setSelectedCwd(selectedCwdProp);
+    }
+  }, [mode, selectedCwdProp, selectedCwd]);
 
   useEffect(() => {
     if (mode === "chat" && chatCwd) setSelectedCwd(chatCwd);
@@ -589,14 +596,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 </button>
               ))}
 
-              {/* Custom path entry */}
+              {/* Workspace browser entry */}
               {!customPathOpen ? (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCustomPathOpen(true);
-                    setCustomPathError(null);
-                    setTimeout(() => customPathInputRef.current?.focus(), 0);
+                    if (onOpenWorkspaceManager) {
+                      setDropdownOpen(false);
+                      onOpenWorkspaceManager();
+                    } else {
+                      setCustomPathOpen(true);
+                      setCustomPathError(null);
+                      setTimeout(() => customPathInputRef.current?.focus(), 0);
+                    }
                   }}
                   style={{
                     display: "flex",
@@ -616,7 +628,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <line x1="5" y1="1" x2="5" y2="9" />
                     <line x1="1" y1="5" x2="9" y2="5" />
                   </svg>
-                  <span>Custom path…</span>
+                  <span>{onOpenWorkspaceManager ? "Browse workspaces…" : "Custom path…"}</span>
                 </button>
               ) : (
                 <div style={{ padding: "6px 8px", borderTop: recentCwds.length > 0 ? "none" : undefined }}>

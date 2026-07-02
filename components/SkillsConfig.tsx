@@ -510,9 +510,11 @@ function AddSkillPanel({
 export function SkillsConfig({
   cwd,
   onClose,
+  embedded = false,
 }: {
   cwd: string;
-  onClose: () => void;
+  onClose?: () => void;
+  embedded?: boolean;
 }) {
   const isMobile = useIsMobile();
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -583,33 +585,19 @@ export function SkillsConfig({
 
   const selectedSkill = skills.find((s) => s.filePath === selected) ?? null;
 
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+  const panel = (
       <div
         style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "78vh",
-          maxHeight: "calc(100dvh - 16px)",
+          width: embedded ? "100%" : isMobile ? "calc(100vw - 16px)" : 860,
+          maxWidth: embedded ? "none" : "calc(100vw - 16px)",
+          height: embedded ? "100%" : isMobile ? "calc(100dvh - 16px)" : "78vh",
+          maxHeight: embedded ? "none" : "calc(100dvh - 16px)",
           background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
+          border: embedded ? "none" : "1px solid var(--border)",
+          borderRadius: embedded ? 0 : 10,
           display: "flex",
           flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+          boxShadow: embedded ? "none" : "0 8px 32px rgba(0,0,0,0.18)",
           overflow: "hidden",
         }}
       >
@@ -644,7 +632,7 @@ export function SkillsConfig({
               {shortenPath(cwd)}
             </code>
           </div>
-          <button
+          {onClose && <button
             onClick={onClose}
             style={{
               background: "none",
@@ -657,7 +645,7 @@ export function SkillsConfig({
             }}
           >
             ×
-          </button>
+          </button>}
         </div>
 
         {/* Body */}
@@ -729,7 +717,7 @@ export function SkillsConfig({
                             letterSpacing: "0.06em",
                           }}
                         >
-                          {grpLabel}
+                            {grpLabel === "project" ? "Current workspace" : grpLabel === "global" ? "Global" : "Path"}
                         </div>
                         {grpSkills.map((skill) => {
                           const isSelected =
@@ -897,7 +885,7 @@ export function SkillsConfig({
             flexShrink: 0,
           }}
         >
-          <button
+          {onClose && <button
             onClick={onClose}
             style={{
               padding: "6px 14px",
@@ -910,9 +898,29 @@ export function SkillsConfig({
             }}
           >
             Close
-          </button>
+          </button>}
         </div>
       </div>
+  );
+
+  if (embedded) return panel;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
+      {panel}
     </div>
   );
 }

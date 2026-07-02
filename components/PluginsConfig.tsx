@@ -559,11 +559,13 @@ export function PluginsConfig({
   sessionId,
   onClose,
   onReloaded,
+  embedded = false,
 }: {
   cwd: string;
   sessionId: string | null;
-  onClose: () => void;
+  onClose?: () => void;
   onReloaded?: () => void;
+  embedded?: boolean;
 }) {
   const isMobile = useIsMobile();
   const [data, setData] = useState<PluginsResponse | null>(null);
@@ -691,33 +693,19 @@ export function PluginsConfig({
 
   const addBusy = busyKey?.startsWith("install:") ?? false;
 
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1000,
-        background: "rgba(0,0,0,0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+  const panel = (
       <div
         style={{
-          width: isMobile ? "calc(100vw - 16px)" : 860,
-          maxWidth: "calc(100vw - 16px)",
-          height: isMobile ? "calc(100dvh - 16px)" : "76vh",
-          maxHeight: "calc(100dvh - 16px)",
+          width: embedded ? "100%" : isMobile ? "calc(100vw - 16px)" : 860,
+          maxWidth: embedded ? "none" : "calc(100vw - 16px)",
+          height: embedded ? "100%" : isMobile ? "calc(100dvh - 16px)" : "76vh",
+          maxHeight: embedded ? "none" : "calc(100dvh - 16px)",
           background: "var(--bg)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
+          border: embedded ? "none" : "1px solid var(--border)",
+          borderRadius: embedded ? 0 : 8,
           display: "flex",
           flexDirection: "column",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+          boxShadow: embedded ? "none" : "0 8px 32px rgba(0,0,0,0.18)",
           overflow: "hidden",
         }}
       >
@@ -748,7 +736,7 @@ export function PluginsConfig({
               {shortenPath(cwd)}
             </code>
           </div>
-          <button
+          {onClose && <button
             onClick={onClose}
             style={{
               background: "none",
@@ -761,7 +749,7 @@ export function PluginsConfig({
             }}
           >
             ×
-          </button>
+          </button>}
         </div>
 
         <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: "hidden" }}>
@@ -802,7 +790,7 @@ export function PluginsConfig({
                         textTransform: "uppercase",
                       }}
                     >
-                      {group.scope}
+                      {group.scope === "project" ? "Current workspace" : "Global"}
                     </div>
                     {group.packages.map((pkg) => {
                       const key = packageKey(pkg);
@@ -1004,11 +992,31 @@ export function PluginsConfig({
           <button onClick={() => void loadPlugins()} disabled={loading || busyKey !== null} style={buttonStyle(loading || busyKey !== null)}>
             Refresh
           </button>
-          <button onClick={onClose} style={buttonStyle(false)}>
+          {onClose && <button onClick={onClose} style={buttonStyle(false)}>
             Close
-          </button>
+          </button>}
         </div>
       </div>
+  );
+
+  if (embedded) return panel;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
+      {panel}
     </div>
   );
 }

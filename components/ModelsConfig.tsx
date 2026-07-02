@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 // Color icons (have their own fill colors — no background needed)
 import AnthropicIcon from "@lobehub/icons/es/Anthropic/components/Mono";
@@ -143,6 +143,23 @@ type ModelTestState =
   | { phase: "testing" }
   | { phase: "success"; latencyMs?: number; status?: number; responseText?: string }
   | { phase: "error"; message: string; latencyMs?: number; status?: number };
+
+interface DiscoveredModel {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  thinkingLevelMap?: Record<string, string | null>;
+  input?: ("text" | "image")[];
+  cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+}
+
+type DiscoveryState =
+  | { phase: "idle" }
+  | { phase: "loading" }
+  | { phase: "success"; models: DiscoveredModel[]; sourceUrl: string; warning?: string }
+  | { phase: "error"; message: string };
 
 type Selection =
   | { type: "provider"; name: string }
@@ -287,11 +304,15 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
+function ProviderDetail({ name, provider, existingModels, onChange, onRename, onDelete, onApplyDiscoveredModel }: {
   name: string; provider: ProviderEntry;
+  existingModels: ModelEntry[];
   onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
+  onApplyDiscoveredModel: (model: DiscoveredModel) => void;
 }) {
   const [editingName, setEditingName] = useState(name);
+  const [discoveryState, setDiscoveryState] = useState<DiscoveryState>({ phase: "idle" });
+  const [discoverySearch, setDiscoverySearch] = useState("");
   useEffect(() => setEditingName(name), [name]);
   const set = <K extends keyof ProviderEntry>(k: K, v: ProviderEntry[K]) => onChange({ ...provider, [k]: v });
 
@@ -299,6 +320,52 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
     if (!provider.api) onChange({ ...provider, api: "openai-completions" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider.api]);
+
+  useEffect(() => {
+    setDiscoveryState({ phase: "idle" });
+    setDiscoverySearch("");
+  }, [name, provider.baseUrl, provider.api, provider.apiKey]);
+
+  const handleDiscover = useCallback(async () => {
+    if (discoveryState.phase === "loading") return;
+    setDiscoveryState({ phase: "loading" });
+    try {
+      const res = await fetch("/api/models-config/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerName: name, provider }),
+      });
+      const data = await res.json() as {
+        models?: DiscoveredModel[];
+        sourceUrl?: string;
+        warning?: string;
+        error?: string;
+      };
+      if (!res.ok || data.error) {
+        setDiscoveryState({ phase: "error", message: data.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      setDiscoveryState({
+        phase: "success",
+        models: data.models ?? [],
+        sourceUrl: data.sourceUrl ?? "",
+        warning: data.warning,
+      });
+    } catch (error) {
+      setDiscoveryState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  }, [discoveryState.phase, name, provider]);
+
+  const existingModelIds = useMemo(() => new Set(existingModels.map((model) => model.id)), [existingModels]);
+  const filteredDiscoveredModels = useMemo(() => {
+    if (discoveryState.phase !== "success") return [];
+    const q = discoverySearch.trim().toLowerCase();
+    if (!q) return discoveryState.models;
+    return discoveryState.models.filter((model) => (
+      model.id.toLowerCase().includes(q) ||
+      (model.name ?? "").toLowerCase().includes(q)
+    ));
+  }, [discoverySearch, discoveryState]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -342,6 +409,122 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
       <Field label="API">
         <Select value={provider.api ?? "openai-completions"} onChange={(v) => set("api", v)} options={API_OPTIONS} required />
       </Field>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <div>
+            <SectionTitle>Model discovery</SectionTitle>
+            {discoveryState.phase === "success" && (
+              <div style={{ marginTop: 2, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+                {discoveryState.sourceUrl}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleDiscover}
+            disabled={discoveryState.phase === "loading" || !provider.baseUrl}
+            title={provider.baseUrl ? "Fetch provider model list" : "Set Base URL first"}
+            style={{
+              height: 28,
+              padding: "0 10px",
+              border: "1px solid var(--border)",
+              borderRadius: 5,
+              background: discoveryState.phase === "loading" ? "var(--bg-panel)" : "var(--bg)",
+              color: discoveryState.phase === "loading" || !provider.baseUrl ? "var(--text-dim)" : "var(--text-muted)",
+              cursor: discoveryState.phase === "loading" || !provider.baseUrl ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            {discoveryState.phase === "loading" ? "Fetching..." : "Fetch models"}
+          </button>
+        </div>
+
+        {discoveryState.phase === "error" && (
+          <div style={{ padding: "7px 9px", border: "1px solid rgba(239,68,68,0.24)", borderRadius: 6, background: "rgba(239,68,68,0.08)", color: "#ef4444", fontSize: 12 }}>
+            {discoveryState.message}
+          </div>
+        )}
+
+        {discoveryState.phase === "success" && (
+          <div style={{ border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden", background: "var(--bg-panel)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 8, borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-dim)", flexShrink: 0 }}>
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                value={discoverySearch}
+                onChange={(e) => setDiscoverySearch(e.target.value)}
+                placeholder={`Search ${discoveryState.models.length} models...`}
+                style={{ flex: 1, minWidth: 0, border: "none", outline: "none", background: "transparent", color: "var(--text)", fontSize: 12 }}
+              />
+            </div>
+            {discoveryState.warning && (
+              <div style={{ padding: "7px 9px", borderBottom: "1px solid var(--border)", color: "var(--text-muted)", fontSize: 12 }}>
+                {discoveryState.warning}
+              </div>
+            )}
+            <div style={{ maxHeight: 280, overflowY: "auto" }}>
+              {filteredDiscoveredModels.length === 0 ? (
+                <div style={{ padding: 16, textAlign: "center", color: "var(--text-dim)", fontSize: 12 }}>No models match</div>
+              ) : filteredDiscoveredModels.map((model) => {
+                const exists = existingModelIds.has(model.id);
+                const meta = [
+                  model.contextWindow ? `${model.contextWindow.toLocaleString()} ctx` : null,
+                  model.maxTokens ? `${model.maxTokens.toLocaleString()} out` : null,
+                  model.reasoning ? "thinking" : null,
+                  model.input?.includes("image") ? "image" : null,
+                ].filter(Boolean);
+                return (
+                  <div
+                    key={model.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "8px 9px",
+                      borderBottom: "1px solid var(--border)",
+                      minHeight: 48,
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 12, color: "var(--text)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {model.id}
+                      </div>
+                      <div style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                        {model.name && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{model.name}</span>}
+                        {meta.map((item) => (
+                          <span key={item} style={{ fontSize: 9, padding: "1px 5px", border: "1px solid var(--border)", borderRadius: 999, color: "var(--text-dim)", background: "var(--bg)" }}>
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => onApplyDiscoveredModel(model)}
+                      style={{
+                        height: 26,
+                        padding: "0 9px",
+                        border: "1px solid var(--border)",
+                        borderRadius: 5,
+                        background: exists ? "var(--bg-hover)" : "var(--accent)",
+                        color: exists ? "var(--text-muted)" : "#fff",
+                        cursor: "pointer",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {exists ? "Update" : "Apply"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1277,7 +1460,7 @@ function AddProviderPicker({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function ModelsConfig({ onClose }: { onClose: () => void }) {
+export function ModelsConfig({ onClose, embedded = false }: { onClose?: () => void; embedded?: boolean }) {
   const isMobile = useIsMobile();
   const [config, setConfig] = useState<ModelsJson>({ providers: {} });
   const [loading, setLoading] = useState(true);
@@ -1391,6 +1574,33 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     setSelection({ type: "provider", name: providerName });
   }, []);
 
+  const applyDiscoveredModel = useCallback((providerName: string, discovered: DiscoveredModel) => {
+    const provider = config.providers?.[providerName] ?? {};
+    const currentModels = provider.models ?? [];
+    const existingIndex = currentModels.findIndex((model) => model.id === discovered.id);
+    const patch: ModelEntry = {
+      id: discovered.id,
+      ...(discovered.name ? { name: discovered.name } : {}),
+      ...(discovered.contextWindow !== undefined ? { contextWindow: discovered.contextWindow } : {}),
+      ...(discovered.maxTokens !== undefined ? { maxTokens: discovered.maxTokens } : {}),
+      ...(discovered.reasoning !== undefined ? { reasoning: discovered.reasoning } : {}),
+      ...(discovered.thinkingLevelMap ? { thinkingLevelMap: discovered.thinkingLevelMap } : {}),
+      ...(discovered.input ? { input: discovered.input } : {}),
+      ...(discovered.cost ? { cost: discovered.cost } : {}),
+    };
+    const models = [...currentModels];
+    const nextIndex = existingIndex >= 0 ? existingIndex : models.length;
+    models[nextIndex] = existingIndex >= 0 ? { ...models[existingIndex], ...patch } : patch;
+    setConfig((prev) => ({
+      ...prev,
+      providers: {
+        ...(prev.providers ?? {}),
+        [providerName]: { ...(prev.providers?.[providerName] ?? {}), models },
+      },
+    }));
+    setSelection({ type: "model", providerName, index: nextIndex });
+  }, [config.providers]);
+
   const handleSave = useCallback(async () => {
     setSaving(true);
     setSaveError(null);
@@ -1436,9 +1646,11 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
           key={selection.name}
           name={selection.name}
           provider={provider}
+          existingModels={provider.models ?? []}
           onChange={(p) => updateProvider(selection.name, p)}
           onRename={(n) => renameProvider(selection.name, n)}
           onDelete={() => deleteProvider(selection.name)}
+          onApplyDiscoveredModel={(model) => applyDiscoveredModel(selection.name, model)}
         />
       );
     }
@@ -1457,11 +1669,8 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
     );
   })();
 
-  return (
-    <>
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ width: isMobile ? "calc(100vw - 16px)" : 860, maxWidth: "calc(100vw - 16px)", height: isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: "calc(100dvh - 16px)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
+  const panel = (
+      <div style={{ width: embedded ? "100%" : isMobile ? "calc(100vw - 16px)" : 860, maxWidth: embedded ? "none" : "calc(100vw - 16px)", height: embedded ? "100%" : isMobile ? "calc(100dvh - 16px)" : "78vh", maxHeight: embedded ? "none" : "calc(100dvh - 16px)", background: "var(--bg)", border: embedded ? "none" : "1px solid var(--border)", borderRadius: embedded ? 0 : 10, display: "flex", flexDirection: "column", boxShadow: embedded ? "none" : "0 8px 32px rgba(0,0,0,0.18)", overflow: "hidden" }}>
 
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
@@ -1469,7 +1678,7 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
             <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>Models</span>
             <code style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>~/.pi/agent/models.json</code>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>
+          {onClose && <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: "2px 6px" }}>×</button>}
         </div>
 
         {/* Body */}
@@ -1613,9 +1822,9 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
         {/* Footer */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, padding: "10px 18px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
           {saveError && <span style={{ fontSize: 12, color: "#f87171", flex: 1 }}>{saveError}</span>}
-          <button onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
+          {onClose && <button onClick={onClose} style={{ padding: "6px 14px", background: "none", border: "1px solid var(--border)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 13 }}>
             Cancel
-          </button>
+          </button>}
           <button onClick={handleSave} disabled={saving || savedOk} style={{
             position: "relative",
             padding: "6px 16px",
@@ -1638,7 +1847,16 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
-    </div>
+  );
+
+  return (
+    <>
+    {embedded ? panel : (
+      <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}>
+        {panel}
+      </div>
+    )}
     {pickerOpen && (
       <AddProviderPicker
         oauthProviders={oauthProviders}

@@ -32,6 +32,7 @@ const DEFAULT_CONFIG: TransportConfigState = {
 
 type Props = {
   onClose?: () => void;
+  embedded?: boolean;
 };
 
 type NumberField = Exclude<keyof TransportConfigState, "enabled" | "compression">;
@@ -54,7 +55,7 @@ function normalize(input: unknown): TransportConfigState {
   return { ...DEFAULT_CONFIG, ...(raw && typeof raw === "object" ? raw : {}) } as TransportConfigState;
 }
 
-export function TransportConfig({ onClose }: Props) {
+export function TransportConfig({ onClose, embedded = false }: Props) {
   const [config, setConfig] = useState<TransportConfigState>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -106,13 +107,14 @@ export function TransportConfig({ onClose }: Props) {
 
   const panel = (
     <div style={{
-      width: "min(720px, calc(100vw - 32px))",
-      maxHeight: onClose ? "calc(100dvh - 48px)" : undefined,
+      width: embedded ? "100%" : "min(720px, calc(100vw - 32px))",
+      height: embedded ? "100%" : undefined,
+      maxHeight: embedded ? "none" : onClose ? "calc(100dvh - 48px)" : undefined,
       overflow: "auto",
-      background: "var(--bg-panel)",
-      border: "1px solid var(--border)",
-      borderRadius: 8,
-      boxShadow: onClose ? "0 20px 60px rgba(0,0,0,0.25)" : "none",
+      background: embedded ? "var(--bg)" : "var(--bg-panel)",
+      border: embedded ? "none" : "1px solid var(--border)",
+      borderRadius: embedded ? 0 : 8,
+      boxShadow: embedded ? "none" : onClose ? "0 20px 60px rgba(0,0,0,0.25)" : "none",
     }}>
       <div style={{
         display: "flex",
@@ -215,7 +217,7 @@ export function TransportConfig({ onClose }: Props) {
     </div>
   );
 
-  if (!onClose) return panel;
+  if (embedded || !onClose) return panel;
 
   return (
     <div style={{

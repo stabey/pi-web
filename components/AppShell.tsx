@@ -6,10 +6,7 @@ import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
-import { ModelsConfig } from "./ModelsConfig";
-import { SkillsConfig } from "./SkillsConfig";
-import { PluginsConfig } from "./PluginsConfig";
-import { TransportConfig } from "./TransportConfig";
+import { SettingsDialog, type SettingsCategory } from "./SettingsDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -52,11 +49,9 @@ export function AppShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
-  const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
-  const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
-  const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
-  const [transportConfigOpen, setTransportConfigOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialCategory, setSettingsInitialCategory] = useState<SettingsCategory>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   // On mobile the sidebar is an overlay drawer; hide it by default so the chat
@@ -341,6 +336,10 @@ export function AppShell() {
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
   const configCwd = mode === "chat" ? chatCwd : activeCwd ?? selectedSession?.cwd ?? newSessionCwd;
+  const openSettings = useCallback((category: SettingsCategory = "overview") => {
+    setSettingsInitialCategory(category);
+    setSettingsOpen(true);
+  }, []);
 
   const sidebarContent = (
     <>
@@ -359,83 +358,27 @@ export function AppShell() {
         onAtMention={handleAtMention}
         mode={mode}
         chatCwd={chatCwd}
+        onOpenWorkspaceManager={() => openSettings("workspaces")}
       />
-      <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
-        {([
-          {
-            label: "Models",
-            onClick: () => setModelsConfigOpen(true),
-            disabled: false,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" />
-                <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
-                <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
-                <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
-                <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
-              </svg>
-            ),
-          },
-          {
-            label: "Skills",
-            onClick: () => setSkillsConfigOpen(true),
-            disabled: !configCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                <path d="M2 17l10 5 10-5" />
-                <path d="M2 12l10 5 10-5" />
-              </svg>
-            ),
-          },
-          {
-            label: "Plugins",
-            onClick: () => setPluginsConfigOpen(true),
-            disabled: !configCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 7V2" />
-                <path d="M15 7V2" />
-                <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
-                <path d="M12 19v3" />
-              </svg>
-            ),
-          },
-          {
-            label: "Transport",
-            onClick: () => setTransportConfigOpen(true),
-            disabled: false,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 7h16" />
-                <path d="M4 17h16" />
-                <path d="M7 4v6" />
-                <path d="M17 14v6" />
-                <circle cx="7" cy="7" r="2" />
-                <circle cx="17" cy="17" r="2" />
-              </svg>
-            ),
-          },
-        ] as { label: string; onClick: () => void; disabled: boolean; icon: React.ReactNode }[]).map(({ label, onClick, disabled, icon }) => (
-          <button
-            key={label}
-            onClick={onClick}
-            disabled={disabled}
-            title={label}
-            style={{
-              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              height: 32, padding: 0, background: "none", border: "none",
-              borderRadius: 9, color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
-              fontSize: 12, opacity: disabled ? 0.35 : 1,
-              transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; } }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
-          >
-            {icon}
-            {label}
-          </button>
-        ))}
+      <div style={{ padding: "8px", flexShrink: 0 }}>
+        <button
+          onClick={() => openSettings("overview")}
+          title="Settings"
+          style={{
+            width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+            height: 34, padding: 0, background: "none", border: "none",
+            borderRadius: 8, color: "var(--text-muted)", cursor: "pointer",
+            fontSize: 12, transition: "background 0.12s, color 0.12s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.6h.1a1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6.9h.1a2 2 0 1 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" />
+          </svg>
+          Settings
+        </button>
       </div>
     </>
   );
@@ -1072,7 +1015,7 @@ export function AppShell() {
                   <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>Get Started</div>
                   <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.8 }}>
                     <span style={{ color: "var(--text-dim)", marginRight: 6 }}>1.</span>Select a project directory from the sidebar<br />
-                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>Add models via the <strong style={{ color: "var(--text)" }}>Models</strong> button at the bottom
+                    <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>Add models in <strong style={{ color: "var(--text)" }}>Settings</strong>
                   </div>
                 </div>
               </div>
@@ -1140,17 +1083,26 @@ export function AppShell() {
       </svg>
     </button>
     )}
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
-    {transportConfigOpen && <TransportConfig onClose={() => setTransportConfigOpen(false)} />}
-    {skillsConfigOpen && configCwd && (
-      <SkillsConfig cwd={configCwd} onClose={() => setSkillsConfigOpen(false)} />
-    )}
-    {pluginsConfigOpen && configCwd && (
-      <PluginsConfig
-        cwd={configCwd}
+    {settingsOpen && (
+      <SettingsDialog
+        initialCategory={settingsInitialCategory}
+        mode={mode}
+        cwd={configCwd ?? null}
+        selectedWorkspace={activeCwd ?? selectedSession?.cwd ?? newSessionCwd ?? null}
         sessionId={selectedSession?.id ?? null}
-        onClose={() => setPluginsConfigOpen(false)}
-        onReloaded={() => setSessionKey((k) => k + 1)}
+        onWorkspaceSelect={(cwd) => {
+          setActiveCwd(cwd);
+          setNewSessionCwd(cwd);
+          setSelectedSession((prev) => prev && prev.cwd !== cwd ? null : prev);
+          setRefreshKey((k) => k + 1);
+        }}
+        onWorkspacesChanged={() => setRefreshKey((k) => k + 1)}
+        onPluginsReloaded={() => setSessionKey((k) => k + 1)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setModelsRefreshKey((k) => k + 1);
+          setRefreshKey((k) => k + 1);
+        }}
       />
     )}
     </>
