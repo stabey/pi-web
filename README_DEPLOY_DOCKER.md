@@ -22,7 +22,18 @@ Create `.env` next to `docker-compose.yml`:
 ```env
 PI_WEB_ADMIN_USER=admin
 PI_WEB_AUTH_SECRET=<random-secret>
-PI_WEB_ADMIN_PASSWORD_HASH=<bcrypt-hash>
+PI_WEB_ADMIN_PASSWORD_HASH='<bcrypt-hash>'
+```
+
+Keep bcrypt hashes in single quotes because they contain `$` characters that
+Docker Compose otherwise treats as variable interpolation.
+
+If the host has slow access to Debian's default apt repositories, you can set
+optional build mirrors:
+
+```env
+APT_MIRROR=http://mirrors.tencent.com/debian
+APT_SECURITY_MIRROR=http://mirrors.tencent.com/debian-security
 ```
 
 ## 2. Prepare Workspaces
