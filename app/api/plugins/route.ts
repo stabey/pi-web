@@ -9,6 +9,8 @@ import {
   type ResolvedPaths,
   type ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
+import { requireAdmin } from "@/lib/admin-auth";
+import { validateKnownCwd, validateWorkspaceCwd } from "@/lib/server-config";
 
 export const dynamic = "force-dynamic";
 
@@ -302,11 +304,11 @@ function readScope(scope: unknown): PluginScope {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const cwd = searchParams.get("cwd");
-  if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
+  const cwdResult = validateKnownCwd(searchParams.get("cwd"));
+  if (!cwdResult.ok) return NextResponse.json({ error: cwdResult.error }, { status: cwdResult.status });
 
   try {
-    return NextResponse.json(await readPlugins(cwd));
+    return NextResponse.json(await readPlugins(cwdResult.cwd));
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
@@ -314,6 +316,9 @@ export async function GET(req: Request) {
 
 // POST /api/plugins body: { action, source?, scope?, cwd }
 export async function POST(req: Request) {
+  const unauthorized = await requireAdmin(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const body = await req.json() as {
       action?: PluginAction;
@@ -321,17 +326,21 @@ export async function POST(req: Request) {
       scope?: PluginScope;
       cwd?: string;
     };
-    if (!body.cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
     if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
 
-    const settingsManager = SettingsManager.create(body.cwd, getAgentDir());
+    const scope = readScope(body.scope);
+    const cwdResult = scope === "project" ? validateWorkspaceCwd(body.cwd) : validateKnownCwd(body.cwd);
+    if (!cwdResult.ok) return NextResponse.json({ error: cwdResult.error }, { status: cwdResult.status });
+
+    const cwd = cwdResult.cwd;
+    const settingsManager = SettingsManager.create(cwd, getAgentDir());
     const packageManager = new DefaultPackageManager({
-      cwd: body.cwd,
+      cwd,
       agentDir: getAgentDir(),
       settingsManager,
     });
     const source = body.source?.trim();
-    const local = readScope(body.scope) === "project";
+    const local = scope === "project";
 
     if (body.action === "install") {
       if (!source) return NextResponse.json({ error: "source required" }, { status: 400 });
@@ -343,17 +352,17 @@ export async function POST(req: Request) {
       await packageManager.update(source);
     } else if (body.action === "disable") {
       if (!source) return NextResponse.json({ error: "source required" }, { status: 400 });
-      setPackageDisabled(settingsManager, source, readScope(body.scope), true);
+      setPackageDisabled(settingsManager, source, scope, true);
       await settingsManager.flush();
     } else if (body.action === "enable") {
       if (!source) return NextResponse.json({ error: "source required" }, { status: 400 });
-      setPackageDisabled(settingsManager, source, readScope(body.scope), false);
+      setPackageDisabled(settingsManager, source, scope, false);
       await settingsManager.flush();
     } else {
       return NextResponse.json({ error: `Unsupported action: ${body.action}` }, { status: 400 });
     }
 
-    return NextResponse.json(await readPlugins(body.cwd));
+    return NextResponse.json(await readPlugins(cwd));
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

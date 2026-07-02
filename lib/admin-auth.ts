@@ -1,4 +1,4 @@
-import type { NextRequest, NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
 export const ADMIN_AUTH_COOKIE = "pi_web_admin";
 export type UserRole = "admin";
@@ -113,6 +113,13 @@ export async function getAdminSessionFromRequest(req: NextRequest | Request): Pr
     .find((part) => part.startsWith(`${ADMIN_AUTH_COOKIE}=`));
   if (!cookie) return null;
   return verifyAdminToken(decodeURIComponent(cookie.slice(ADMIN_AUTH_COOKIE.length + 1)));
+}
+
+export async function requireAdmin(req: NextRequest | Request): Promise<NextResponse | null> {
+  if (!isAdminAuthRequired()) return null;
+  const session = await getAdminSessionFromRequest(req);
+  if (session) return null;
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
 export async function setAdminCookie(res: NextResponse, user = getAdminUser()): Promise<void> {

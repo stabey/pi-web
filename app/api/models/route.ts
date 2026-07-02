@@ -1,6 +1,6 @@
-import { stat } from "fs/promises";
 import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { ensureChatCwd, validateKnownCwd } from "@/lib/server-config";
 
 export const dynamic = "force-dynamic";
 
@@ -21,17 +21,10 @@ export async function GET(req: Request) {
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
-  const cwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
-
-  let cwdStat;
-  try {
-    cwdStat = await stat(cwd);
-  } catch {
-    return Response.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
-  }
-  if (!cwdStat.isDirectory()) {
-    return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
-  }
+  const requestedCwd = new URL(req.url).searchParams.get("cwd") ?? ensureChatCwd();
+  const cwdResult = validateKnownCwd(requestedCwd);
+  if (!cwdResult.ok) return Response.json({ error: cwdResult.error }, { status: cwdResult.status });
+  const cwd = cwdResult.cwd;
 
   try {
     const agentDir = getAgentDir();

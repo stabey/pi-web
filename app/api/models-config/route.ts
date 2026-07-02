@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { requireAdmin } from "@/lib/admin-auth";
+import { maskModelSecrets, mergeMaskedModelSecrets } from "@/lib/models-config-secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +29,17 @@ function writeModelsJson(data: Record<string, unknown>): void {
 }
 
 export async function GET() {
-  return NextResponse.json(readModelsJson());
+  return NextResponse.json(maskModelSecrets(readModelsJson()));
 }
 
 export async function PUT(req: Request) {
+  const unauthorized = await requireAdmin(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const body = await req.json() as Record<string, unknown>;
-    writeModelsJson(body);
+    const merged = mergeMaskedModelSecrets(body, readModelsJson()) as Record<string, unknown>;
+    writeModelsJson(merged);
     // Model registry refreshes on each /api/models request (no local cache to invalidate)
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { completeSimple, type AssistantMessage } from "@earendil-works/pi-ai/compat";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, getAgentDir, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { requireAdmin } from "@/lib/admin-auth";
+import { mergeMaskedModelSecrets } from "@/lib/models-config-secrets";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +26,30 @@ function getAssistantText(message: AssistantMessage): string {
     .join("");
 }
 
+function readExistingProvider(providerName: string): Record<string, unknown> | undefined {
+  const modelsPath = join(getAgentDir(), "models.json");
+  if (!existsSync(modelsPath)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(modelsPath, "utf8")) as { providers?: unknown };
+    if (!isRecord(parsed.providers)) return undefined;
+    const provider = parsed.providers[providerName];
+    return isRecord(provider) ? provider : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function findExistingModel(provider: Record<string, unknown> | undefined, modelId: string): Record<string, unknown> | undefined {
+  if (!Array.isArray(provider?.models)) return undefined;
+  return provider.models.find((model): model is Record<string, unknown> => (
+    isRecord(model) && model.id === modelId
+  ));
+}
+
 export async function POST(req: Request) {
+  const unauthorized = await requireAdmin(req);
+  if (unauthorized) return unauthorized;
+
   let tempDir: string | undefined;
 
   try {
@@ -37,13 +62,18 @@ export async function POST(req: Request) {
     const modelId = typeof body.model.id === "string" ? body.model.id.trim() : "";
     if (!modelId) return NextResponse.json({ ok: false, error: "Model ID is required" }, { status: 400 });
 
+    const existingProvider = readExistingProvider(providerName);
+    const existingModel = findExistingModel(existingProvider, modelId);
+    const provider = mergeMaskedModelSecrets(body.provider, existingProvider) as Record<string, unknown>;
+    const modelConfig = mergeMaskedModelSecrets(body.model, existingModel) as Record<string, unknown>;
+
     tempDir = mkdtempSync(join(tmpdir(), "pi-web-model-test-"));
     const modelsPath = join(tempDir, "models.json");
     writeFileSync(modelsPath, JSON.stringify({
       providers: {
         [providerName]: {
-          ...body.provider,
-          models: [{ ...body.model, id: modelId }],
+          ...provider,
+          models: [{ ...modelConfig, id: modelId }],
         },
       },
     }, null, 2), "utf8");

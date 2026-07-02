@@ -101,6 +101,29 @@ export function validateWorkspaceCwd(cwd: unknown): { ok: true; cwd: string } | 
   return { ok: true, cwd: normalized };
 }
 
+export function validateKnownCwd(cwd: unknown): { ok: true; cwd: string; mode: AgentMode } | { ok: false; error: string; status: number } {
+  if (typeof cwd !== "string" || !cwd.trim()) {
+    return { ok: false, error: "cwd is required", status: 400 };
+  }
+
+  const normalized = normalizeAbsolutePath(cwd);
+  const mode = getModeForCwd(normalized);
+  if (!mode) {
+    return { ok: false, error: `Directory is outside configured chat/workspace roots: ${cwd}`, status: 403 };
+  }
+
+  try {
+    const stat = statSync(normalized);
+    if (!stat.isDirectory()) {
+      return { ok: false, error: `Path is not a directory: ${cwd}`, status: 400 };
+    }
+  } catch {
+    return { ok: false, error: `Directory does not exist: ${cwd}`, status: 400 };
+  }
+
+  return { ok: true, cwd: normalized, mode };
+}
+
 export type WorkspaceInfo = {
   path: string;
   name: string;

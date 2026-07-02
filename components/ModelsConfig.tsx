@@ -33,6 +33,7 @@ import NvidiaColorIcon from "@lobehub/icons/es/Nvidia/components/Color";
 import OpenCodeIcon from "@lobehub/icons/es/OpenCode/components/Mono";
 import XiaomiMiMoIcon from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
 import ZAIIcon from "@lobehub/icons/es/ZAI/components/Mono";
+import { MASKED_MODEL_SECRET } from "@/lib/models-config-secrets";
 
 type IconComponent = React.ComponentType<{ size?: number | string; style?: React.CSSProperties }>;
 
@@ -325,10 +326,16 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete }: {
       </Field>
 
       <Field label="API Key">
-        <SecretTextInput value={provider.apiKey ?? ""} onChange={(v) => set("apiKey", v || undefined)}
-          placeholder="ENV_VAR_NAME, !shell-command, or literal key" mono />
+        <SecretTextInput
+          value={provider.apiKey === MASKED_MODEL_SECRET ? "" : provider.apiKey ?? ""}
+          onChange={(v) => set("apiKey", v || undefined)}
+          placeholder={provider.apiKey === MASKED_MODEL_SECRET ? "Stored key is hidden; enter a new key to replace" : "ENV_VAR_NAME, !shell-command, or literal key"}
+          mono
+        />
         <span style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
-          Prefix with <code style={{ fontFamily: "var(--font-mono)" }}>!</code> to run a shell command, or use an env var name
+          {provider.apiKey === MASKED_MODEL_SECRET
+            ? "Saving keeps the stored key unless you enter a replacement."
+            : <>Prefix with <code style={{ fontFamily: "var(--font-mono)" }}>!</code> to run a shell command, or use an env var name</>}
         </span>
       </Field>
 
