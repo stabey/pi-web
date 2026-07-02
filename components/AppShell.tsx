@@ -177,9 +177,11 @@ export function AppShell() {
   const suppressCwdBumpRef = useRef(false);
 
   const handleCwdChange = useCallback((cwd: string | null) => {
+    if (cwd === activeCwd) return;
     setActiveCwd(cwd);
     // Skip if cwd is null (initial mount) or during the initial URL restore.
     if (!cwd) return;
+    if (mode === "chat") return;
     if (suppressCwdBumpRef.current) {
       suppressCwdBumpRef.current = false;
       return;
@@ -200,7 +202,7 @@ export function AppShell() {
     setSystemPrompt(null);
     setActiveTopPanel(null);
     router.replace("/", { scroll: false });
-  }, [router]);
+  }, [activeCwd, mode, router]);
 
   useEffect(() => {
     if (mode === "chat" && chatCwd) setActiveCwd(chatCwd);
@@ -350,8 +352,8 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
-        selectedCwd={mode === "chat" ? chatCwd : selectedSession?.cwd ?? newSessionCwd ?? null}
-        onCwdChange={handleCwdChange}
+        selectedCwd={mode === "coding" ? selectedSession?.cwd ?? newSessionCwd ?? null : null}
+        onCwdChange={mode === "coding" ? handleCwdChange : undefined}
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}

@@ -375,7 +375,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const recentCwds = getRecentCwds(allSessions).filter((cwd) => mode !== "chat" || cwd === chatCwd);
   const workspaceCwds = workspaces.map((workspace) => workspace.path);
   const pickerCwds = [...new Set([...workspaceCwds, ...recentCwds])];
-  const effectiveSelectedCwd = mode === "chat" ? chatCwd ?? selectedCwd : selectedCwd;
+  const codingSelectedCwd = mode === "coding"
+    ? selectedCwdProp ?? (selectedCwd !== chatCwd ? selectedCwd : null)
+    : null;
+  const effectiveSelectedCwd = mode === "chat" ? chatCwd ?? selectedCwd : codingSelectedCwd;
   const filteredSessions = effectiveSelectedCwd
     ? allSessions.filter((s) => s.cwd === effectiveSelectedCwd)
     : allSessions;
@@ -701,7 +704,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       </div>
 
       {/* Session list */}
-      <div style={{ flex: explorerOpen && mode === "coding" && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
+      <div style={{ flex: explorerOpen && codingSelectedCwd ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
             Loading...
@@ -734,7 +737,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       </div>
 
       {/* File Explorer section */}
-      {mode === "coding" && (selectedCwdProp || selectedCwd) && (
+      {codingSelectedCwd && (
         <div
           style={{
             borderTop: "1px solid var(--border)",
@@ -811,7 +814,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           {explorerOpen && (
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
               <FileExplorer
-                cwd={selectedCwdProp ?? selectedCwd!}
+                cwd={codingSelectedCwd}
                 onOpenFile={onOpenFile ?? (() => {})}
                 refreshKey={explorerKey}
                 onAtMention={onAtMention}
