@@ -279,8 +279,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const restoredRef = useRef(false);
 
   useEffect(() => {
-    onCwdChange?.(selectedCwd);
-  }, [selectedCwd, onCwdChange]);
+    const cwdForMode = mode === "coding" && selectedCwd === chatCwd ? null : selectedCwd;
+    onCwdChange?.(cwdForMode);
+  }, [selectedCwd, onCwdChange, mode, chatCwd]);
 
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
@@ -314,7 +315,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
       }
-      const cwds = getRecentCwds(allSessions);
+      const cwds = getRecentCwds(allSessions).filter((cwd) => cwd !== chatCwd);
       if (cwds.length > 0) setSelectedCwd(cwds[0]);
     }
   }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone, mode, chatCwd]);
@@ -372,7 +373,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onNewSession?.(tempId, cwd);
   }, [mode, chatCwd, selectedCwd, onNewSession]);
 
-  const recentCwds = getRecentCwds(allSessions).filter((cwd) => mode !== "chat" || cwd === chatCwd);
+  const recentCwds = getRecentCwds(allSessions).filter((cwd) => mode === "chat" ? cwd === chatCwd : cwd !== chatCwd);
   const workspaceCwds = workspaces.map((workspace) => workspace.path);
   const pickerCwds = [...new Set([...workspaceCwds, ...recentCwds])];
   const codingSelectedCwd = mode === "coding"
@@ -381,7 +382,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const effectiveSelectedCwd = mode === "chat" ? chatCwd ?? selectedCwd : codingSelectedCwd;
   const filteredSessions = effectiveSelectedCwd
     ? allSessions.filter((s) => s.cwd === effectiveSelectedCwd)
-    : allSessions;
+    : mode === "coding"
+      ? []
+      : allSessions;
 
   // Build parent-child tree within the filtered set
   const sessionTree = buildSessionTree(filteredSessions);
