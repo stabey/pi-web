@@ -73,6 +73,17 @@ ai.example.com {
 /data/cache          Package manager caches
 ```
 
+## Custom Model Endpoints
+
+Custom OpenAI-compatible and Anthropic-compatible providers live in:
+
+```text
+/data/pi-agent/models.json
+```
+
+See [docs/custom-model-endpoints.md](./docs/custom-model-endpoints.md) for
+tested `baseUrl` examples, compatibility options, and model test behavior.
+
 ## Security Notes
 
 - All pages and APIs are protected when `PI_WEB_AUTH_REQUIRED=true`.
