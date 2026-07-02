@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { AuthStorage, getAgentDir, ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -21,7 +22,20 @@ export type ModelDiscoveryResult = {
   warning?: string;
 };
 
+export type CachedModelDiscoveryResult = ModelDiscoveryResult & {
+  providerName: string;
+  cacheKey: string;
+  fetchedAt: string;
+};
+
 const DISCOVERY_TIMEOUT_MS = 20_000;
+const DISCOVERY_CACHE_VERSION = 1;
+const DISCOVERY_CACHE_FILE = "model-discovery-cache.json";
+
+type DiscoveryCacheFile = {
+  version: typeof DISCOVERY_CACHE_VERSION;
+  providers: Record<string, CachedModelDiscoveryResult>;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -55,6 +69,75 @@ function readExistingProvider(providerName: string): Record<string, unknown> | u
   } catch {
     return undefined;
   }
+}
+
+function getDiscoveryCachePath(): string {
+  return join(getAgentDir(), DISCOVERY_CACHE_FILE);
+}
+
+function readDiscoveryCacheFile(): DiscoveryCacheFile {
+  const path = getDiscoveryCachePath();
+  if (!existsSync(path)) return { version: DISCOVERY_CACHE_VERSION, providers: {} };
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<DiscoveryCacheFile>;
+    if (parsed.version !== DISCOVERY_CACHE_VERSION || !isRecord(parsed.providers)) {
+      return { version: DISCOVERY_CACHE_VERSION, providers: {} };
+    }
+    return {
+      version: DISCOVERY_CACHE_VERSION,
+      providers: parsed.providers as Record<string, CachedModelDiscoveryResult>,
+    };
+  } catch {
+    return { version: DISCOVERY_CACHE_VERSION, providers: {} };
+  }
+}
+
+function writeDiscoveryCacheFile(cache: DiscoveryCacheFile): void {
+  const agentDir = getAgentDir();
+  if (!existsSync(agentDir)) mkdirSync(agentDir, { recursive: true });
+  writeFileSync(getDiscoveryCachePath(), JSON.stringify(cache, null, 2), "utf8");
+}
+
+function getProviderCacheKey(providerName: string, provider: Record<string, unknown>): string {
+  const headers = isRecord(provider.headers) ? Object.keys(provider.headers).sort() : [];
+  const fingerprint = {
+    providerName,
+    baseUrl: asString(provider.baseUrl) ?? "",
+    api: asString(provider.api) ?? "openai-completions",
+    headers,
+  };
+  return createHash("sha256").update(JSON.stringify(fingerprint)).digest("hex");
+}
+
+function mergeProviderInput(providerName: string, providerInput: Record<string, unknown>): Record<string, unknown> {
+  const existingProvider = readExistingProvider(providerName);
+  return mergeMaskedModelSecrets(providerInput, existingProvider) as Record<string, unknown>;
+}
+
+export function readCachedProviderModels(providerName: string, providerInput: Record<string, unknown>): CachedModelDiscoveryResult | null {
+  const provider = mergeProviderInput(providerName, providerInput);
+  const cacheKey = getProviderCacheKey(providerName, provider);
+  const cached = readDiscoveryCacheFile().providers[providerName];
+  if (!cached || cached.cacheKey !== cacheKey) return null;
+  return cached;
+}
+
+export function writeCachedProviderModels(
+  providerName: string,
+  providerInput: Record<string, unknown>,
+  result: ModelDiscoveryResult,
+): CachedModelDiscoveryResult {
+  const provider = mergeProviderInput(providerName, providerInput);
+  const cache = readDiscoveryCacheFile();
+  const cached: CachedModelDiscoveryResult = {
+    ...result,
+    providerName,
+    cacheKey: getProviderCacheKey(providerName, provider),
+    fetchedAt: new Date().toISOString(),
+  };
+  cache.providers[providerName] = cached;
+  writeDiscoveryCacheFile(cache);
+  return cached;
 }
 
 function getStringArray(value: unknown): string[] {
@@ -227,8 +310,7 @@ async function resolveProviderAuth(providerName: string, provider: Record<string
 }
 
 export async function discoverProviderModels(providerName: string, providerInput: Record<string, unknown>): Promise<ModelDiscoveryResult> {
-  const existingProvider = readExistingProvider(providerName);
-  const provider = mergeMaskedModelSecrets(providerInput, existingProvider) as Record<string, unknown>;
+  const provider = mergeProviderInput(providerName, providerInput);
   const baseUrl = asString(provider.baseUrl);
   if (!baseUrl) throw new Error("Base URL is required before fetching models");
 

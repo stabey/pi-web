@@ -158,7 +158,7 @@ interface DiscoveredModel {
 type DiscoveryState =
   | { phase: "idle" }
   | { phase: "loading" }
-  | { phase: "success"; models: DiscoveredModel[]; sourceUrl: string; warning?: string }
+  | { phase: "success"; models: DiscoveredModel[]; sourceUrl: string; warning?: string; fetchedAt?: string }
   | { phase: "error"; message: string };
 
 type Selection =
@@ -168,6 +168,30 @@ type Selection =
   | { type: "apikey"; providerId: string };
 
 const API_OPTIONS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
+const IDLE_DISCOVERY_STATE: DiscoveryState = { phase: "idle" };
+
+function getProviderDiscoveryKey(name: string, provider: ProviderEntry): string {
+  const headerKeys = Object.keys(provider.headers ?? {}).sort().join(",");
+  return [
+    name,
+    provider.baseUrl?.trim() ?? "",
+    provider.api?.trim() || "openai-completions",
+    headerKeys,
+  ].join("\n");
+}
+
+function formatFetchedAt(value: string | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 // ── Form field helpers ────────────────────────────────────────────────────────
 
@@ -304,14 +328,29 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── Provider detail ───────────────────────────────────────────────────────────
 
-function ProviderDetail({ name, provider, existingModels, onChange, onRename, onDelete, onApplyDiscoveredModel }: {
+function ProviderDetail({
+  name,
+  provider,
+  existingModels,
+  discoveryKey,
+  discoveryState,
+  onChange,
+  onRename,
+  onDelete,
+  onApplyDiscoveredModel,
+  onDiscoveryStateChange,
+  onLoadCachedDiscovery,
+}: {
   name: string; provider: ProviderEntry;
   existingModels: ModelEntry[];
+  discoveryKey: string;
+  discoveryState: DiscoveryState;
   onChange: (p: ProviderEntry) => void; onRename: (n: string) => void; onDelete: () => void;
   onApplyDiscoveredModel: (model: DiscoveredModel) => void;
+  onDiscoveryStateChange: (state: DiscoveryState) => void;
+  onLoadCachedDiscovery: (discoveryKey: string, providerName: string, provider: ProviderEntry) => void;
 }) {
   const [editingName, setEditingName] = useState(name);
-  const [discoveryState, setDiscoveryState] = useState<DiscoveryState>({ phase: "idle" });
   const [discoverySearch, setDiscoverySearch] = useState("");
   useEffect(() => setEditingName(name), [name]);
   const set = <K extends keyof ProviderEntry>(k: K, v: ProviderEntry[K]) => onChange({ ...provider, [k]: v });
@@ -322,13 +361,13 @@ function ProviderDetail({ name, provider, existingModels, onChange, onRename, on
   }, [provider.api]);
 
   useEffect(() => {
-    setDiscoveryState({ phase: "idle" });
     setDiscoverySearch("");
-  }, [name, provider.baseUrl, provider.api, provider.apiKey]);
+    onLoadCachedDiscovery(discoveryKey, name, provider);
+  }, [discoveryKey, name, onLoadCachedDiscovery, provider]);
 
   const handleDiscover = useCallback(async () => {
     if (discoveryState.phase === "loading") return;
-    setDiscoveryState({ phase: "loading" });
+    onDiscoveryStateChange({ phase: "loading" });
     try {
       const res = await fetch("/api/models-config/discover", {
         method: "POST",
@@ -339,24 +378,27 @@ function ProviderDetail({ name, provider, existingModels, onChange, onRename, on
         models?: DiscoveredModel[];
         sourceUrl?: string;
         warning?: string;
+        fetchedAt?: string;
         error?: string;
       };
       if (!res.ok || data.error) {
-        setDiscoveryState({ phase: "error", message: data.error ?? `HTTP ${res.status}` });
+        onDiscoveryStateChange({ phase: "error", message: data.error ?? `HTTP ${res.status}` });
         return;
       }
-      setDiscoveryState({
+      onDiscoveryStateChange({
         phase: "success",
         models: data.models ?? [],
         sourceUrl: data.sourceUrl ?? "",
         warning: data.warning,
+        fetchedAt: data.fetchedAt,
       });
     } catch (error) {
-      setDiscoveryState({ phase: "error", message: error instanceof Error ? error.message : String(error) });
+      onDiscoveryStateChange({ phase: "error", message: error instanceof Error ? error.message : String(error) });
     }
-  }, [discoveryState.phase, name, provider]);
+  }, [discoveryState.phase, name, onDiscoveryStateChange, provider]);
 
   const existingModelIds = useMemo(() => new Set(existingModels.map((model) => model.id)), [existingModels]);
+  const fetchedAtLabel = discoveryState.phase === "success" ? formatFetchedAt(discoveryState.fetchedAt) : null;
   const filteredDiscoveredModels = useMemo(() => {
     if (discoveryState.phase !== "success") return [];
     const q = discoverySearch.trim().toLowerCase();
@@ -415,9 +457,18 @@ function ProviderDetail({ name, provider, existingModels, onChange, onRename, on
           <div>
             <SectionTitle>Model discovery</SectionTitle>
             {discoveryState.phase === "success" && (
-              <div style={{ marginTop: 2, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
-                {discoveryState.sourceUrl}
-              </div>
+              <>
+                {fetchedAtLabel && (
+                  <div style={{ marginTop: 2, fontSize: 10, color: "var(--text-dim)" }}>
+                    Last fetched {fetchedAtLabel}
+                  </div>
+                )}
+                {discoveryState.sourceUrl && (
+                  <div style={{ marginTop: 2, fontSize: 10, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+                    {discoveryState.sourceUrl}
+                  </div>
+                )}
+              </>
             )}
           </div>
           <button
@@ -1471,6 +1522,58 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose?: () => vo
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [discoveryByProviderKey, setDiscoveryByProviderKey] = useState<Record<string, DiscoveryState>>({});
+  const discoveryByProviderKeyRef = useRef(discoveryByProviderKey);
+  const discoveryCacheLoadsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    discoveryByProviderKeyRef.current = discoveryByProviderKey;
+  }, [discoveryByProviderKey]);
+
+  const setDiscoveryStateForKey = useCallback((discoveryKey: string, state: DiscoveryState) => {
+    setDiscoveryByProviderKey((prev) => ({ ...prev, [discoveryKey]: state }));
+  }, []);
+
+  const loadCachedDiscovery = useCallback(async (discoveryKey: string, providerName: string, provider: ProviderEntry) => {
+    if (!provider.baseUrl || discoveryCacheLoadsRef.current.has(discoveryKey)) return;
+    const current = discoveryByProviderKeyRef.current[discoveryKey];
+    if (current && current.phase !== "idle") return;
+
+    discoveryCacheLoadsRef.current.add(discoveryKey);
+    try {
+      const res = await fetch("/api/models-config/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerName, provider, cacheOnly: true }),
+      });
+      const data = await res.json() as {
+        cached?: boolean;
+        models?: DiscoveredModel[];
+        sourceUrl?: string;
+        warning?: string;
+        fetchedAt?: string;
+      };
+      if (!res.ok || !data.cached || !Array.isArray(data.models)) return;
+      setDiscoveryByProviderKey((prev) => {
+        const latest = prev[discoveryKey];
+        if (latest && latest.phase !== "idle") return prev;
+        return {
+          ...prev,
+          [discoveryKey]: {
+            phase: "success",
+            models: data.models ?? [],
+            sourceUrl: data.sourceUrl ?? "",
+            warning: data.warning,
+            fetchedAt: data.fetchedAt,
+          },
+        };
+      });
+    } catch {
+      // Cache restore is best-effort; manual Fetch models will surface real errors.
+    } finally {
+      discoveryCacheLoadsRef.current.delete(discoveryKey);
+    }
+  }, []);
 
   const loadOAuthProviders = useCallback(() => {
     fetch("/api/auth/providers")
@@ -1641,16 +1744,21 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose?: () => vo
     if (selection.type === "provider") {
       const provider = config.providers?.[selection.name];
       if (!provider) return null;
+      const discoveryKey = getProviderDiscoveryKey(selection.name, provider);
       return (
         <ProviderDetail
           key={selection.name}
           name={selection.name}
           provider={provider}
           existingModels={provider.models ?? []}
+          discoveryKey={discoveryKey}
+          discoveryState={discoveryByProviderKey[discoveryKey] ?? IDLE_DISCOVERY_STATE}
           onChange={(p) => updateProvider(selection.name, p)}
           onRename={(n) => renameProvider(selection.name, n)}
           onDelete={() => deleteProvider(selection.name)}
           onApplyDiscoveredModel={(model) => applyDiscoveredModel(selection.name, model)}
+          onDiscoveryStateChange={(state) => setDiscoveryStateForKey(discoveryKey, state)}
+          onLoadCachedDiscovery={loadCachedDiscovery}
         />
       );
     }
