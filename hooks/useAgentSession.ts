@@ -10,7 +10,7 @@ import type {
   SessionTreeNode,
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
-import { sendAgentCommand } from "@/lib/agent-client";
+import { base64UrlToBytes, concatBytes, sendAgentCommand, sendNewAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import {
@@ -449,21 +449,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const selectedModel = newSessionModel ?? newSessionDefaultModel;
       if (selectedModel) setPendingModel(selectedModel);
       const toolNames = toolNamesForPreset(toolPreset);
-      const res = await fetch("/api/agent/new", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          cwd: newSessionCwd,
-          type: "ensure_session",
-          toolPreset,
-          toolNames,
-          ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-          ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
-        }),
+      const result = await sendNewAgentCommand({
+        mode,
+        cwd: newSessionCwd,
+        type: "ensure_session",
+        toolPreset,
+        toolNames,
+        ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
+        ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json() as { sessionId: string };
       const realId = result.sessionId;
       sessionIdRef.current = realId;
       return realId;
@@ -508,6 +502,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     return new Promise((resolve) => {
       let settled = false;
+      const binaryEvents = new Map<string, { chunks: (Uint8Array | undefined)[]; total: number }>();
+      const decoder = new TextDecoder();
       const settle = () => {
         if (settled) return;
         settled = true;
@@ -516,15 +512,52 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       };
       const timeout = setTimeout(settle, 1500);
 
-      es.onmessage = (e) => {
+      const handleRawEvent = (raw: string) => {
         try {
-          const event = JSON.parse(e.data) as AgentEvent;
+          const event = JSON.parse(raw) as AgentEvent;
           if (event.type === "connected") settle();
           handleAgentEventRef.current?.(event);
         } catch {
           // ignore
         }
       };
+
+      es.onmessage = (e) => {
+        handleRawEvent(e.data);
+      };
+      es.addEventListener("binary_chunk", (event) => {
+        try {
+          const chunk = JSON.parse((event as MessageEvent).data) as {
+            id?: unknown;
+            seq?: unknown;
+            total?: unknown;
+            data?: unknown;
+          };
+          if (typeof chunk.id !== "string" || typeof chunk.data !== "string") return;
+          const seq = Number(chunk.seq);
+          const total = Number(chunk.total);
+          if (!Number.isInteger(seq) || !Number.isInteger(total) || seq < 0 || total <= 0 || seq >= total) return;
+          const entry = binaryEvents.get(chunk.id) ?? { chunks: Array.from({ length: total }), total };
+          if (entry.total !== total) return;
+          entry.chunks[seq] = base64UrlToBytes(chunk.data);
+          binaryEvents.set(chunk.id, entry);
+        } catch {
+          // ignore malformed transport chunks
+        }
+      });
+      es.addEventListener("binary_done", (event) => {
+        try {
+          const done = JSON.parse((event as MessageEvent).data) as { id?: unknown };
+          if (typeof done.id !== "string") return;
+          const entry = binaryEvents.get(done.id);
+          if (!entry || entry.chunks.some((chunk) => !chunk)) return;
+          binaryEvents.delete(done.id);
+          const chunks = entry.chunks.filter((chunk): chunk is Uint8Array => Boolean(chunk));
+          handleRawEvent(decoder.decode(concatBytes(chunks)));
+        } catch {
+          // ignore malformed transport completion
+        }
+      });
       es.onerror = () => {
         settle();
         if (eventSourceRef.current === es && agentRunningRef.current) {
@@ -834,21 +867,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         } else {
           if (selectedModel) setPendingModel(selectedModel);
           const toolNames = toolNamesForPreset(toolPreset);
-          const res = await fetch("/api/agent/new", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode,
-              cwd: newSessionCwd,
-              type: "ensure_session",
-              toolPreset,
-              toolNames,
-              ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-              ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
-            }),
+          const result = await sendNewAgentCommand({
+            mode,
+            cwd: newSessionCwd,
+            type: "ensure_session",
+            toolPreset,
+            toolNames,
+            ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
+            ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const result = await res.json() as { sessionId: string };
           const realId = result.sessionId;
           sessionIdRef.current = realId;
           sentSessionId = realId;

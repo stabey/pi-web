@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import { resolveSessionPath } from "@/lib/session-reader";
-import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { defaultToolPresetForMode, toolNamesForPreset } from "@/lib/agent-modes";
-import { getModeForCwd } from "@/lib/server-config";
+import { sendExistingAgentCommand } from "@/lib/agent-server";
+import { getRpcSession } from "@/lib/rpc-manager";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -14,30 +11,8 @@ export async function POST(
 
   try {
     const body = await req.json() as { type: string; [key: string]: unknown };
-
-    // Fast path: already-running session
-    const existing = getRpcSession(id);
-    if (existing?.isAlive()) {
-      const result = await existing.send(body);
-      return NextResponse.json({ success: true, data: result });
-    }
-
-    const filePath = await resolveSessionPath(id);
-    if (!filePath) {
-      return NextResponse.json({ error: "Session not found" }, { status: 404 });
-    }
-
-    const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
-    const mode = getModeForCwd(cwd);
-    if (!mode) {
-      return NextResponse.json({ error: "Session cwd is outside configured chat/workspace roots" }, { status: 403 });
-    }
-    const toolNames = toolNamesForPreset(defaultToolPresetForMode(mode));
-
-    const { session } = await startRpcSession(id, filePath, cwd, toolNames);
-    const result = await session.send(body);
-
-    return NextResponse.json({ success: true, data: result });
+    const result = await sendExistingAgentCommand(id, body);
+    return NextResponse.json(result.body, { status: result.status ?? 200 });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
