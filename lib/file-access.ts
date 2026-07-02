@@ -2,6 +2,7 @@ import { readdirSync } from "fs";
 import { homedir } from "os";
 import path from "path";
 import { listAllSessions } from "./session-reader";
+import { getWorkspaceRoots } from "./server-config";
 
 // Short-TTL cache for the allowed-roots set. Without this, every file list/read
 // request re-scans every pi session on disk just to check access. 5s is short
@@ -42,21 +43,25 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   const cached = globalThis.__piAllowedRootsCache;
   if (cached && cached.expiresAt > now) return cached.roots;
 
-  const sessions = await listAllSessions();
   const roots = new Set<string>();
-  for (const s of sessions) {
-    if (s.cwd) roots.add(normalizeSlashes(s.cwd));
-  }
+  for (const root of getWorkspaceRoots()) roots.add(normalizeSlashes(root));
 
-  // Also allow ~/pi-cwd-* directories created by the default-cwd endpoint.
-  try {
-    for (const name of readdirSync(homedir())) {
-      if (/^pi-cwd-\d{8}$/.test(name)) {
-        roots.add(normalizeSlashes(path.join(homedir(), name)));
-      }
+  if (process.env.PI_WEB_LEGACY_SESSION_FILE_ROOTS === "true") {
+    const sessions = await listAllSessions();
+    for (const s of sessions) {
+      if (s.cwd) roots.add(normalizeSlashes(s.cwd));
     }
-  } catch {
-    // ignore if home is unreadable
+
+    // Also allow ~/pi-cwd-* directories created by older default-cwd behavior.
+    try {
+      for (const name of readdirSync(homedir())) {
+        if (/^pi-cwd-\d{8}$/.test(name)) {
+          roots.add(normalizeSlashes(path.join(homedir(), name)));
+        }
+      }
+    } catch {
+      // ignore if home is unreadable
+    }
   }
 
   for (const root of getAdditionalAllowedRoots()) roots.add(root);

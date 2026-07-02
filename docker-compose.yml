@@ -1,0 +1,41 @@
+services:
+  pi-web:
+    build: .
+    container_name: pi-web
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      NODE_ENV: production
+      PORT: "30141"
+      HOSTNAME: "0.0.0.0"
+
+      PI_CODING_AGENT_DIR: /data/pi-agent
+      PI_WEB_CHAT_ROOT: /data/chat
+      PI_WEB_WORKSPACE_ROOTS: /data/workspaces
+      PI_WEB_UPLOAD_ROOT: /data/uploads
+
+      PI_WEB_AUTH_REQUIRED: "true"
+      PI_WEB_ADMIN_USER: "${PI_WEB_ADMIN_USER:-admin}"
+      PI_WEB_AUTH_SECRET: "${PI_WEB_AUTH_SECRET}"
+      PI_WEB_ADMIN_PASSWORD_HASH: "${PI_WEB_ADMIN_PASSWORD_HASH}"
+      PI_WEB_AUTH_COOKIE_SECURE: "${PI_WEB_AUTH_COOKIE_SECURE:-true}"
+
+      NPM_CONFIG_CACHE: /data/cache/npm
+      PIP_CACHE_DIR: /data/cache/pip
+      GOMODCACHE: /data/cache/go/pkg/mod
+      CARGO_HOME: /data/cache/cargo
+      UV_CACHE_DIR: /data/cache/uv
+    volumes:
+      - pi_agent:/data/pi-agent
+      - pi_chat:/data/chat
+      - pi_cache:/data/cache
+      - pi_uploads:/data/uploads
+      - ./workspaces:/data/workspaces
+    ports:
+      - "127.0.0.1:30141:30141"
+
+volumes:
+  pi_agent:
+  pi_chat:
+  pi_cache:
+  pi_uploads:

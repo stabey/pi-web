@@ -10,6 +10,7 @@ import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import type { AgentMode } from "@/lib/agent-modes";
 
 interface Props {
   session: SessionInfo | null;
@@ -24,6 +25,7 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
+  mode?: AgentMode;
 }
 
 function phaseLabel(phase: AgentPhase): string {
@@ -98,7 +100,7 @@ function Typewriter({ phrases }: { phrases: string[] }) {
   );
 }
 
-export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange }: Props) {
+export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, mode = "coding" }: Props) {
   const {
     loading, error, messages, entryIds, streamState,
     agentRunning, modelNames, modelList, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
@@ -118,6 +120,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
   } = useAgentSession({
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
+    mode,
   });
 
   const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
@@ -215,7 +218,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       compactError={compactError}
       compactResult={compactResult}
       toolPreset={toolPreset}
-      onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
+      onToolPresetChange={mode === "coding" && (session || isNew) ? handleToolPresetChange : undefined}
       thinkingLevel={thinkingLevel}
       onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
       availableThinkingLevels={availableThinkingLevels}

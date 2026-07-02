@@ -1,6 +1,8 @@
 import { resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { defaultToolPresetForMode, toolNamesForPreset } from "@/lib/agent-modes";
+import { getModeForCwd } from "@/lib/server-config";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +21,13 @@ export async function GET(
       return new Response("Session not found", { status: 404 });
     }
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
+    const mode = getModeForCwd(cwd);
+    if (!mode) {
+      return new Response("Session cwd is outside configured chat/workspace roots", { status: 403 });
+    }
+    const toolNames = toolNamesForPreset(defaultToolPresetForMode(mode));
     try {
-      ({ session } = await startRpcSession(id, filePath, cwd));
+      ({ session } = await startRpcSession(id, filePath, cwd, toolNames));
     } catch (error) {
       return new Response(`Failed to start agent: ${error}`, { status: 500 });
     }

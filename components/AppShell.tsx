@@ -15,6 +15,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import type { AgentMode } from "@/lib/agent-modes";
 
 type SessionCopyField = "file" | "id";
 
@@ -45,6 +46,8 @@ export function AppShell() {
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
+  const [mode, setMode] = useState<AgentMode>("chat");
+  const [chatCwd, setChatCwd] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sessionKey, setSessionKey] = useState(0);
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
@@ -64,6 +67,16 @@ export function AppShell() {
   }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (chatCwd) return;
+    fetch("/api/default-cwd", { method: "POST" })
+      .then((res) => res.json())
+      .then((data: { cwd?: string }) => {
+        if (data.cwd) setChatCwd(data.cwd);
+      })
+      .catch(() => {});
+  }, [chatCwd]);
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -187,6 +200,27 @@ export function AppShell() {
     router.replace("/", { scroll: false });
   }, [router]);
 
+  useEffect(() => {
+    if (mode === "chat" && chatCwd) setActiveCwd(chatCwd);
+  }, [mode, chatCwd]);
+
+  const handleModeChange = useCallback((nextMode: AgentMode) => {
+    if (nextMode === mode) return;
+    setMode(nextMode);
+    setSelectedSession(null);
+    setNewSessionCwd(null);
+    setActiveCwd(nextMode === "chat" ? chatCwd : null);
+    setFileTabs([]);
+    setActiveFileTabId(null);
+    setRightPanelOpen(false);
+    setSessionKey((k) => k + 1);
+    setBranchTree([]);
+    setBranchActiveLeafId(null);
+    setSystemPrompt(null);
+    setActiveTopPanel(null);
+    router.replace("/", { scroll: false });
+  }, [mode, chatCwd, router]);
+
   const handleSelectSession = useCallback((session: SessionInfo, isRestore = false) => {
     setNewSessionCwd(null);
     setSelectedSession(session);
@@ -263,6 +297,7 @@ export function AppShell() {
   }, [selectedSession, router]);
 
   const handleOpenFile = useCallback((filePath: string, fileName: string) => {
+    if (mode !== "coding") return;
     const tabId = `file:${filePath}`;
     setFileTabs((prev) => {
       if (prev.find((t) => t.id === tabId)) return prev;
@@ -272,7 +307,7 @@ export function AppShell() {
     setRightPanelOpen(true);
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
-  }, [isMobile]);
+  }, [isMobile, mode]);
 
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
@@ -293,12 +328,15 @@ export function AppShell() {
   }, [selectedSession]);
 
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
-  const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
+  const effectiveNewSessionCwd = mode === "chat"
+    ? (selectedSession === null ? chatCwd : null)
+    : newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
+  const configCwd = mode === "chat" ? chatCwd : activeCwd ?? selectedSession?.cwd ?? newSessionCwd;
 
   const sidebarContent = (
     <>
@@ -310,11 +348,13 @@ export function AppShell() {
         onInitialRestoreDone={handleInitialRestoreDone}
         refreshKey={refreshKey}
         onSessionDeleted={handleSessionDeleted}
-        selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
+        selectedCwd={mode === "chat" ? chatCwd : selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
         onOpenFile={handleOpenFile}
         explorerRefreshKey={explorerRefreshKey}
         onAtMention={handleAtMention}
+        mode={mode}
+        chatCwd={chatCwd}
       />
       <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
@@ -335,7 +375,7 @@ export function AppShell() {
           {
             label: "Skills",
             onClick: () => setSkillsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
+            disabled: !configCwd,
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -347,7 +387,7 @@ export function AppShell() {
           {
             label: "Plugins",
             onClick: () => setPluginsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
+            disabled: !configCwd,
             icon: (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 7V2" />
@@ -543,6 +583,46 @@ export function AppShell() {
               </svg>
             )}
           </button>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            height: 28,
+            padding: 3,
+            marginLeft: 8,
+            marginRight: 8,
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            background: "var(--bg)",
+            flexShrink: 0,
+          }}>
+            {(["chat", "coding"] as AgentMode[]).map((item) => {
+              const active = mode === item;
+              return (
+                <button
+                  key={item}
+                  onClick={() => handleModeChange(item)}
+                  aria-pressed={active}
+                  title={item === "chat" ? "Chat mode" : "Coding mode"}
+                  style={{
+                    height: 22,
+                    minWidth: 58,
+                    padding: "0 10px",
+                    border: "none",
+                    borderRadius: 6,
+                    background: active ? "var(--bg-selected)" : "transparent",
+                    color: active ? "var(--text)" : "var(--text-muted)",
+                    fontSize: 11,
+                    fontWeight: active ? 650 : 500,
+                    cursor: "pointer",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {item}
+                </button>
+              );
+            })}
+          </div>
           {showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <button
@@ -953,11 +1033,16 @@ export function AppShell() {
               onSessionStatsChange={handleSessionStatsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
               onContextUsageChange={handleContextUsageChange}
+              mode={mode}
             />
           ) : showPlaceholder ? (
             activeCwd ? (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 15 }}>
                 Select a session from the sidebar
+              </div>
+            ) : mode === "chat" ? (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 15 }}>
+                Preparing chat...
               </div>
             ) : (
               <div style={{ position: "absolute", top: 12, left: 12, display: "flex", alignItems: "flex-start", gap: 8, userSelect: "none", pointerEvents: "none" }}>
@@ -977,7 +1062,8 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* Right panel: file viewer — always mounted, width animated via CSS */}
+      {/* Right panel: file viewer — coding mode only */}
+      {mode === "coding" && (
       <div
         className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
         style={{
@@ -1011,8 +1097,10 @@ export function AppShell() {
           )}
         </div>
       </div>
+      )}
     </div>
     {/* File panel toggle — always visible at top-right */}
+    {mode === "coding" && (
     <button
       onClick={() => setRightPanelOpen((v) => !v)}
       title={rightPanelOpen ? "Hide file panel" : "Show file panel"}
@@ -1032,13 +1120,14 @@ export function AppShell() {
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
       </svg>
     </button>
-    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
-    {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
-      <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
     )}
-    {pluginsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
+    {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
+    {skillsConfigOpen && configCwd && (
+      <SkillsConfig cwd={configCwd} onClose={() => setSkillsConfigOpen(false)} />
+    )}
+    {pluginsConfigOpen && configCwd && (
       <PluginsConfig
-        cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!}
+        cwd={configCwd}
         sessionId={selectedSession?.id ?? null}
         onClose={() => setPluginsConfigOpen(false)}
         onReloaded={() => setSessionKey((k) => k + 1)}

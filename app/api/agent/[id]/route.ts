@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { defaultToolPresetForMode, toolNamesForPreset } from "@/lib/agent-modes";
+import { getModeForCwd } from "@/lib/server-config";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -26,8 +28,13 @@ export async function POST(
     }
 
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
+    const mode = getModeForCwd(cwd);
+    if (!mode) {
+      return NextResponse.json({ error: "Session cwd is outside configured chat/workspace roots" }, { status: 403 });
+    }
+    const toolNames = toolNamesForPreset(defaultToolPresetForMode(mode));
 
-    const { session } = await startRpcSession(id, filePath, cwd);
+    const { session } = await startRpcSession(id, filePath, cwd, toolNames);
     const result = await session.send(body);
 
     return NextResponse.json({ success: true, data: result });

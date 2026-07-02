@@ -13,6 +13,12 @@ import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ToolEntry } from "@/components/ToolPanel";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import {
+  defaultToolPresetForMode,
+  toolNamesForPreset,
+  type AgentMode,
+  type ToolPreset,
+} from "@/lib/agent-modes";
 
 export interface SessionData {
   sessionId: string;
@@ -138,7 +144,8 @@ export interface UseAgentSessionOptions {
   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
   onSystemPromptChange?: (prompt: string | null) => void;
   onSessionStatsPanelOpen?: () => void;
-  setToolPreset?: (preset: "none" | "default" | "full") => void;
+  setToolPreset?: (preset: ToolPreset) => void;
+  mode?: AgentMode;
 }
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -247,6 +254,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const {
     session, newSessionCwd, onAgentEnd, onSessionCreated, onSessionForked,
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange, onSessionStatsPanelOpen,
+    mode = "coding",
   } = opts;
 
   const isNew = session === null && newSessionCwd !== null;
@@ -265,7 +273,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [modelThinkingLevelMaps, setModelThinkingLevelMaps] = useState<Record<string, Record<string, string | null>>>({});
   const [newSessionModel, setNewSessionModel] = useState<SelectedModel | null>(null);
   const [newSessionDefaultModel, setNewSessionDefaultModel] = useState<SelectedModel | null>(null);
-  const [toolPreset, setToolPreset] = useState<"none" | "default" | "full">("default");
+  const [toolPreset, setToolPreset] = useState<ToolPreset>(() => defaultToolPresetForMode(mode));
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
   const [retryInfo, setRetryInfo] = useState<{ attempt: number; maxAttempts: number; errorMessage?: string } | null>(null);
   const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
@@ -303,6 +311,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const promptRunIdRef = useRef(0);
 
   const setToolPresetState = opts.setToolPreset ?? setToolPreset;
+
+  useEffect(() => {
+    setToolPresetState(defaultToolPresetForMode(mode));
+  }, [mode, setToolPresetState]);
 
   const currentModel = currentModelOverride ?? data?.context.model ?? pendingModel ?? null;
   const displayModel = isNew ? (newSessionModel ?? newSessionDefaultModel) : currentModel;
@@ -436,14 +448,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const promise = (async () => {
       const selectedModel = newSessionModel ?? newSessionDefaultModel;
       if (selectedModel) setPendingModel(selectedModel);
-      const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
-      const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+      const toolNames = toolNamesForPreset(toolPreset);
       const res = await fetch("/api/agent/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode,
           cwd: newSessionCwd,
           type: "ensure_session",
+          toolPreset,
           toolNames,
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
           ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
@@ -462,7 +475,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       ensuringNewSessionRef.current = null;
     }
-  }, [isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel]);
+  }, [isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel, mode]);
 
   const loadSlashCommands = useCallback(async () => {
     const sid = sessionIdRef.current ?? await ensureNewSession();
@@ -820,14 +833,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           promoteNewSession(1, message);
         } else {
           if (selectedModel) setPendingModel(selectedModel);
-          const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
-          const toolNames = toolPreset === "none" ? PRESET_NONE : toolPreset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+          const toolNames = toolNamesForPreset(toolPreset);
           const res = await fetch("/api/agent/new", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              mode,
               cwd: newSessionCwd,
               type: "ensure_session",
+              toolPreset,
               toolNames,
               ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
               ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
@@ -865,7 +879,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, promoteNewSession, waitForPromptSettlement]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, promoteNewSession, waitForPromptSettlement, mode]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -1106,9 +1120,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, []);
 
-  const handleToolPresetChange = useCallback(async (preset: "none" | "default" | "full") => {
-    const { PRESET_NONE, PRESET_DEFAULT, PRESET_FULL } = await import("@/components/ToolPanel");
-    const toolNames = preset === "none" ? PRESET_NONE : preset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+  const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
+    const toolNames = toolNamesForPreset(preset);
     setToolPresetState(preset);
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;

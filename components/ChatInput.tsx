@@ -4,6 +4,7 @@ import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, f
 import type { BuiltinSlashCommandResult, CompactResultInfo, SlashCommandInfo } from "@/hooks/useAgentSession";
 import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import type { ToolPreset } from "@/lib/agent-modes";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -34,8 +35,8 @@ interface Props {
   isCompacting?: boolean;
   compactError?: string | null;
   compactResult?: CompactResultInfo | null;
-  toolPreset?: "none" | "default" | "full";
-  onToolPresetChange?: (preset: "none" | "default" | "full") => void;
+  toolPreset?: ToolPreset;
+  onToolPresetChange?: (preset: ToolPreset) => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh") => void;
   availableThinkingLevels?: string[] | null;
@@ -56,8 +57,12 @@ export interface ChatInputHandle {
   addImages: (files: File[]) => void;
 }
 
-const TOOL_PRESETS = ["off", "default", "full"] as const;
-const TOOL_PRESET_MAP: Record<"off" | "default" | "full", "none" | "default" | "full"> = { off: "none", default: "default", full: "full" };
+const TOOL_PRESETS = ["read", "edit", "full"] as const;
+const TOOL_PRESET_MAP: Record<typeof TOOL_PRESETS[number], ToolPreset> = {
+  read: "coding-readonly",
+  edit: "coding-edit",
+  full: "coding-full",
+};
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const MODEL_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
@@ -587,7 +592,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (lvl === "auto" || !thinkingLevelMap) return lvl;
     return thinkingLevelMap[lvl] ?? lvl;
   })();
-  const toolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default";
+  const toolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "coding-readonly"))?.[0] ?? "read";
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1325,8 +1330,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   }}>
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];
-                      const isActive = (toolPreset ?? "default") === preset;
-                      const desc = lvl === "off" ? "无工具，纯聊天" : lvl === "default" ? "4 项内置工具" : "全部内置工具";
+                      const isActive = (toolPreset ?? "coding-readonly") === preset;
+                      const desc = lvl === "read" ? "只读工具" : lvl === "edit" ? "读写工具" : "含 bash";
                       return (
                         <button
                           key={lvl}
