@@ -7,6 +7,7 @@ import type { AgentMode } from "@/lib/agent-modes";
 
 interface Props {
   selectedSessionId: string | null;
+  selectedSession?: SessionInfo | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
   onNewSession?: (sessionId: string, cwd: string) => void;
   initialSessionId?: string | null;
@@ -240,7 +241,7 @@ function PiAgentTitle() {
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, mode = "coding", chatCwd, onOpenWorkspaceManager }: Props) {
+export function SessionSidebar({ selectedSessionId, selectedSession, onSelectSession, onNewSession, initialSessionId, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onAtMention, mode = "coding", chatCwd, onOpenWorkspaceManager }: Props) {
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -570,7 +571,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onNewSession?.(tempId, cwd);
   }, [mode, chatCwd, selectedCwd, onNewSession]);
 
-  const recentCwds = getRecentCwds(allSessions).filter((cwd) => mode === "chat" ? cwd === chatCwd : cwd !== chatCwd);
+  const displaySessions = selectedSession && !allSessions.some((session) => session.id === selectedSession.id)
+    ? [selectedSession, ...allSessions]
+    : allSessions;
+  const recentCwds = getRecentCwds(displaySessions).filter((cwd) => mode === "chat" ? cwd === chatCwd : cwd !== chatCwd);
   const workspaceCwds = workspaces.map((workspace) => workspace.path);
   const pickerCwds = [...new Set([...workspaceCwds, ...recentCwds])];
   const codingSelectedCwd = mode === "coding"
@@ -578,10 +582,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     : null;
   const effectiveSelectedCwd = mode === "chat" ? chatCwd ?? selectedCwd : codingSelectedCwd;
   const filteredSessions = effectiveSelectedCwd
-    ? allSessions.filter((s) => s.cwd === effectiveSelectedCwd)
+    ? displaySessions.filter((s) => s.cwd === effectiveSelectedCwd)
     : mode === "coding"
       ? []
-      : allSessions;
+      : displaySessions;
 
   // Build parent-child tree within the filtered set
   const sessionTree = buildSessionTree(filteredSessions);
