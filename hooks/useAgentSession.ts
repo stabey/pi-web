@@ -159,6 +159,9 @@ const USER_SCROLL_INTENT_MS = 1200;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
 const PROMPT_SETTLE_POLL_MS = 2_000;
 const PROMPT_SETTLE_MAX_MS = 30 * 60_000;
+const EVENT_CONNECT_TIMEOUT_MS = 12_000;
+const EVENT_STREAM_SUPPRESS_MS = 10 * 60_000;
+const EVENT_STREAM_SUPPRESS_KEY = "pi-web:event-stream-suppressed-until";
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -173,6 +176,23 @@ function createNoticeId(): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isEventStreamSuppressed(): boolean {
+  if (typeof window === "undefined") return false;
+  const value = window.sessionStorage.getItem(EVENT_STREAM_SUPPRESS_KEY);
+  const until = value ? Number(value) : 0;
+  return Number.isFinite(until) && until > Date.now();
+}
+
+function suppressEventStream(): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(EVENT_STREAM_SUPPRESS_KEY, String(Date.now() + EVENT_STREAM_SUPPRESS_MS));
+}
+
+function clearEventStreamSuppression(): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(EVENT_STREAM_SUPPRESS_KEY);
 }
 
 function markOldestNoticeExiting(notices: NoticeItem[]): NoticeItem[] {
@@ -500,6 +520,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     eventConnectionRef.current?.close();
     eventConnectionRef.current = null;
 
+    if (isEventStreamSuppressed()) {
+      return Promise.resolve();
+    }
+
     const controller = new AbortController();
     const connection: AgentEventConnection = {
       close: () => controller.abort(),
@@ -508,6 +532,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
     return new Promise((resolve) => {
       let settled = false;
+      let connected = false;
+      let connectTimedOut = false;
       const binaryEvents = new Map<string, { chunks: (Uint8Array | undefined)[]; total: number }>();
       const decoder = new TextDecoder();
       const streamDecoder = new TextDecoder();
@@ -515,15 +541,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const settle = () => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        clearTimeout(readyTimeout);
         resolve();
       };
-      const timeout = setTimeout(settle, 1500);
+      const readyTimeout = setTimeout(settle, 1500);
+      const connectTimeout = setTimeout(() => {
+        if (connected || controller.signal.aborted || eventConnectionRef.current !== connection) return;
+        connectTimedOut = true;
+        suppressEventStream();
+        eventConnectionRef.current = null;
+        controller.abort();
+        settle();
+      }, EVENT_CONNECT_TIMEOUT_MS);
+
+      const markConnected = () => {
+        if (connected) return;
+        connected = true;
+        clearTimeout(connectTimeout);
+        clearEventStreamSuppression();
+        settle();
+      };
+
+      const cleanupConnection = () => {
+        clearTimeout(connectTimeout);
+        settle();
+      };
 
       const handleRawEvent = (raw: string) => {
         try {
           const event = JSON.parse(raw) as AgentEvent;
-          if (event.type === "connected") settle();
+          if (event.type === "connected") markConnected();
           handleAgentEventRef.current?.(event);
         } catch {
           // ignore
@@ -602,8 +649,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       };
 
       const reconnect = () => {
-        settle();
-        if (eventConnectionRef.current === connection && agentRunningRef.current) {
+        cleanupConnection();
+        if (!connectTimedOut && eventConnectionRef.current === connection && agentRunningRef.current) {
           eventConnectionRef.current = null;
           setTimeout(() => {
             if (agentRunningRef.current) void connectEvents(sid);
@@ -622,6 +669,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             signal: controller.signal,
           });
           if (!res.ok || !res.body) {
+            clearTimeout(connectTimeout);
             reconnect();
             return;
           }
@@ -636,7 +684,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           }
           reconnect();
         } catch {
-          if (!controller.signal.aborted) reconnect();
+          if (!controller.signal.aborted) {
+            reconnect();
+          } else {
+            cleanupConnection();
+          }
         }
       })();
     });
