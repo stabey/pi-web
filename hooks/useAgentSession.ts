@@ -153,8 +153,8 @@ export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" 
 const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
 const USER_SCROLL_INTENT_MS = 1200;
 const PROMPT_SETTLE_INITIAL_DELAY_MS = 800;
-const PROMPT_SETTLE_POLL_MS = 600;
-const PROMPT_SETTLE_MAX_MS = 20_000;
+const PROMPT_SETTLE_POLL_MS = 2_000;
+const PROMPT_SETTLE_MAX_MS = 30 * 60_000;
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -896,7 +896,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ...(piImages?.length ? { images: piImages } : {}),
         });
       }
-      if (isSlashCommandPrompt && sentSessionId) {
+      if (sentSessionId) {
         void waitForPromptSettlement(sentSessionId, promptRunId);
       }
     } catch (e) {
@@ -1201,9 +1201,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             setAgentPhase(agentState.state.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
             dispatch({ type: "start" });
             void connectEvents(session.id);
-            if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
-              void waitForPromptSettlement(session.id);
-            }
+            void waitForPromptSettlement(session.id);
           }
         }
         if (agentState?.state) {
