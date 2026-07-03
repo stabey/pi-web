@@ -11,6 +11,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "30141"
+      PI_WEB_WS_PORT: "30142"
       HOSTNAME: "0.0.0.0"
 
       PI_CODING_AGENT_DIR: /data/pi-agent
@@ -38,6 +39,7 @@ services:
       - ./workspaces:/data/workspaces
     ports:
       - "127.0.0.1:30141:30141"
+      - "127.0.0.1:30142:30142"
 
 volumes:
   pi_agent:

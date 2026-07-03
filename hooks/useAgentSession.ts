@@ -162,6 +162,7 @@ const PROMPT_SETTLE_MAX_MS = 30 * 60_000;
 const EVENT_CONNECT_TIMEOUT_MS = 12_000;
 const EVENT_STREAM_SUPPRESS_MS = 10 * 60_000;
 const EVENT_STREAM_SUPPRESS_KEY = "pi-web:event-stream-suppressed-until";
+const EVENT_WS_SUPPRESS_KEY = "pi-web:event-ws-suppressed-until";
 const MAX_NOTICES = 5;
 const NOTICE_VISIBLE_MS = 5000;
 const NOTICE_EXIT_ANIMATION_MS = 180;
@@ -193,6 +194,30 @@ function suppressEventStream(): void {
 function clearEventStreamSuppression(): void {
   if (typeof window === "undefined") return;
   window.sessionStorage.removeItem(EVENT_STREAM_SUPPRESS_KEY);
+}
+
+function isEventWsSuppressed(): boolean {
+  if (typeof window === "undefined") return false;
+  const value = window.sessionStorage.getItem(EVENT_WS_SUPPRESS_KEY);
+  const until = value ? Number(value) : 0;
+  return Number.isFinite(until) && until > Date.now();
+}
+
+function suppressEventWs(): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(EVENT_WS_SUPPRESS_KEY, String(Date.now() + EVENT_STREAM_SUPPRESS_MS));
+}
+
+function clearEventWsSuppression(): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(EVENT_WS_SUPPRESS_KEY);
+}
+
+function createAgentEventWsUrl(sid: string): string | null {
+  if (typeof window === "undefined") return null;
+  const url = new URL(`/api/agent/${encodeURIComponent(sid)}/ws`, window.location.href);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 function markOldestNoticeExiting(notices: NoticeItem[]): NoticeItem[] {
@@ -520,178 +545,272 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     eventConnectionRef.current?.close();
     eventConnectionRef.current = null;
 
-    if (isEventStreamSuppressed()) {
-      return Promise.resolve();
-    }
+    const binaryEvents = new Map<string, { chunks: (Uint8Array | undefined)[]; total: number }>();
+    const decoder = new TextDecoder();
+    const streamDecoder = new TextDecoder();
+    let sseBuffer = "";
+    let markConnected = () => {};
 
-    const controller = new AbortController();
-    const connection: AgentEventConnection = {
-      close: () => controller.abort(),
+    const handleRawEvent = (raw: string) => {
+      try {
+        const event = JSON.parse(raw) as AgentEvent;
+        if (event.type === "connected") markConnected();
+        handleAgentEventRef.current?.(event);
+      } catch {
+        // ignore
+      }
     };
-    eventConnectionRef.current = connection;
 
-    return new Promise((resolve) => {
-      let settled = false;
-      let connected = false;
-      let connectTimedOut = false;
-      const binaryEvents = new Map<string, { chunks: (Uint8Array | undefined)[]; total: number }>();
-      const decoder = new TextDecoder();
-      const streamDecoder = new TextDecoder();
-      let sseBuffer = "";
-      const settle = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(readyTimeout);
-        resolve();
-      };
-      const readyTimeout = setTimeout(settle, 1500);
-      const connectTimeout = setTimeout(() => {
-        if (connected || controller.signal.aborted || eventConnectionRef.current !== connection) return;
-        connectTimedOut = true;
-        suppressEventStream();
-        eventConnectionRef.current = null;
-        controller.abort();
-        settle();
-      }, EVENT_CONNECT_TIMEOUT_MS);
+    const handleBinaryChunk = (raw: string) => {
+      try {
+        const chunk = JSON.parse(raw) as {
+          id?: unknown;
+          seq?: unknown;
+          total?: unknown;
+          data?: unknown;
+        };
+        if (typeof chunk.id !== "string" || typeof chunk.data !== "string") return;
+        const seq = Number(chunk.seq);
+        const total = Number(chunk.total);
+        if (!Number.isInteger(seq) || !Number.isInteger(total) || seq < 0 || total <= 0 || seq >= total) return;
+        const entry = binaryEvents.get(chunk.id) ?? { chunks: Array.from({ length: total }), total };
+        if (entry.total !== total) return;
+        entry.chunks[seq] = base64UrlToBytes(chunk.data);
+        binaryEvents.set(chunk.id, entry);
+      } catch {
+        // ignore malformed transport chunks
+      }
+    };
 
-      const markConnected = () => {
-        if (connected) return;
-        connected = true;
-        clearTimeout(connectTimeout);
-        clearEventStreamSuppression();
-        settle();
-      };
+    const handleBinaryDone = (raw: string) => {
+      try {
+        const done = JSON.parse(raw) as { id?: unknown };
+        if (typeof done.id !== "string") return;
+        const entry = binaryEvents.get(done.id);
+        if (!entry || entry.chunks.some((chunk) => !chunk)) return;
+        binaryEvents.delete(done.id);
+        const chunks = entry.chunks.filter((chunk): chunk is Uint8Array => Boolean(chunk));
+        handleRawEvent(decoder.decode(concatBytes(chunks)));
+      } catch {
+        // ignore malformed transport completion
+      }
+    };
 
-      const cleanupConnection = () => {
-        clearTimeout(connectTimeout);
-        settle();
-      };
+    const handleSseEvent = (eventName: string, data: string) => {
+      if (eventName === "ping") return;
+      if (eventName === "binary_chunk") {
+        handleBinaryChunk(data);
+        return;
+      }
+      if (eventName === "binary_done") {
+        handleBinaryDone(data);
+        return;
+      }
+      handleRawEvent(data);
+    };
 
-      const handleRawEvent = (raw: string) => {
-        try {
-          const event = JSON.parse(raw) as AgentEvent;
-          if (event.type === "connected") markConnected();
-          handleAgentEventRef.current?.(event);
-        } catch {
-          // ignore
-        }
-      };
+    const processSseBuffer = () => {
+      sseBuffer = sseBuffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let boundary = sseBuffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        const frame = sseBuffer.slice(0, boundary);
+        sseBuffer = sseBuffer.slice(boundary + 2);
+        boundary = sseBuffer.indexOf("\n\n");
 
-      const handleBinaryChunk = (raw: string) => {
-        try {
-          const chunk = JSON.parse(raw) as {
-            id?: unknown;
-            seq?: unknown;
-            total?: unknown;
-            data?: unknown;
-          };
-          if (typeof chunk.id !== "string" || typeof chunk.data !== "string") return;
-          const seq = Number(chunk.seq);
-          const total = Number(chunk.total);
-          if (!Number.isInteger(seq) || !Number.isInteger(total) || seq < 0 || total <= 0 || seq >= total) return;
-          const entry = binaryEvents.get(chunk.id) ?? { chunks: Array.from({ length: total }), total };
-          if (entry.total !== total) return;
-          entry.chunks[seq] = base64UrlToBytes(chunk.data);
-          binaryEvents.set(chunk.id, entry);
-        } catch {
-          // ignore malformed transport chunks
-        }
-      };
-
-      const handleBinaryDone = (raw: string) => {
-        try {
-          const done = JSON.parse(raw) as { id?: unknown };
-          if (typeof done.id !== "string") return;
-          const entry = binaryEvents.get(done.id);
-          if (!entry || entry.chunks.some((chunk) => !chunk)) return;
-          binaryEvents.delete(done.id);
-          const chunks = entry.chunks.filter((chunk): chunk is Uint8Array => Boolean(chunk));
-          handleRawEvent(decoder.decode(concatBytes(chunks)));
-        } catch {
-          // ignore malformed transport completion
-        }
-      };
-
-      const handleSseEvent = (eventName: string, data: string) => {
-        if (eventName === "ping") return;
-        if (eventName === "binary_chunk") {
-          handleBinaryChunk(data);
-          return;
-        }
-        if (eventName === "binary_done") {
-          handleBinaryDone(data);
-          return;
-        }
-        handleRawEvent(data);
-      };
-
-      const processSseBuffer = () => {
-        sseBuffer = sseBuffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        let boundary = sseBuffer.indexOf("\n\n");
-        while (boundary !== -1) {
-          const frame = sseBuffer.slice(0, boundary);
-          sseBuffer = sseBuffer.slice(boundary + 2);
-          boundary = sseBuffer.indexOf("\n\n");
-
-          let eventName = "message";
-          const dataLines: string[] = [];
-          for (const line of frame.split("\n")) {
-            if (!line || line.startsWith(":")) continue;
-            if (line.startsWith("event:")) {
-              eventName = line.slice(6).trimStart();
-            } else if (line.startsWith("data:")) {
-              dataLines.push(line.slice(5).replace(/^ /, ""));
-            }
+        let eventName = "message";
+        const dataLines: string[] = [];
+        for (const line of frame.split("\n")) {
+          if (!line || line.startsWith(":")) continue;
+          if (line.startsWith("event:")) {
+            eventName = line.slice(6).trimStart();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).replace(/^ /, ""));
           }
-          if (dataLines.length === 0) continue;
-          handleSseEvent(eventName, dataLines.join("\n"));
         }
-      };
+        if (dataLines.length === 0) continue;
+        handleSseEvent(eventName, dataLines.join("\n"));
+      }
+    };
 
-      const reconnect = () => {
-        cleanupConnection();
-        if (!connectTimedOut && eventConnectionRef.current === connection && agentRunningRef.current) {
+    const connectViaWebSocket = (): Promise<boolean> => {
+      if (isEventWsSuppressed() || typeof WebSocket === "undefined") {
+        return Promise.resolve(false);
+      }
+      const url = createAgentEventWsUrl(sid);
+      if (!url) return Promise.resolve(false);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        suppressEventWs();
+        return Promise.resolve(false);
+      }
+
+      const connection: AgentEventConnection = {
+        close: () => ws.close(1000, "client close"),
+      };
+      eventConnectionRef.current = connection;
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let connected = false;
+        let connectTimedOut = false;
+
+        const settle = (usable: boolean) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(readyTimeout);
+          resolve(usable);
+        };
+        const readyTimeout = setTimeout(() => settle(true), 1500);
+        const connectTimeout = setTimeout(() => {
+          if (connected || eventConnectionRef.current !== connection) return;
+          connectTimedOut = true;
+          suppressEventWs();
           eventConnectionRef.current = null;
-          setTimeout(() => {
-            if (agentRunningRef.current) void connectEvents(sid);
-          }, 1000);
-        }
-      };
+          ws.close(1000, "connect timeout");
+          settle(false);
+        }, EVENT_CONNECT_TIMEOUT_MS);
 
-      void (async () => {
-        try {
-          const res = await fetch(`/api/agent/${encodeURIComponent(sid)}/events`, {
-            method: "POST",
-            headers: {
-              Accept: "text/event-stream",
-              "Cache-Control": "no-cache",
-            },
-            signal: controller.signal,
-          });
-          if (!res.ok || !res.body) {
-            clearTimeout(connectTimeout);
-            reconnect();
-            return;
-          }
+        markConnected = () => {
+          if (connected) return;
+          connected = true;
+          clearTimeout(connectTimeout);
+          clearEventWsSuppression();
+          clearEventStreamSuppression();
+          settle(true);
+        };
 
-          const reader = res.body.getReader();
-          while (eventConnectionRef.current === connection) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            if (!value) continue;
-            sseBuffer += streamDecoder.decode(value, { stream: true });
-            processSseBuffer();
+        const cleanupConnection = () => {
+          clearTimeout(connectTimeout);
+          settle(connected);
+        };
+
+        ws.onmessage = (message) => {
+          if (eventConnectionRef.current !== connection || typeof message.data !== "string") return;
+          try {
+            const envelope = JSON.parse(message.data) as { event?: unknown; data?: unknown };
+            if (typeof envelope.data !== "string") return;
+            handleSseEvent(typeof envelope.event === "string" ? envelope.event : "message", envelope.data);
+          } catch {
+            // ignore malformed websocket frames
           }
-          reconnect();
-        } catch {
-          if (!controller.signal.aborted) {
-            reconnect();
-          } else {
+        };
+
+        ws.onerror = () => {
+          if (!connected) {
+            suppressEventWs();
+            if (eventConnectionRef.current === connection) eventConnectionRef.current = null;
             cleanupConnection();
           }
-        }
-      })();
-    });
+        };
+
+        ws.onclose = () => {
+          const shouldReconnect = connected && !connectTimedOut && eventConnectionRef.current === connection && agentRunningRef.current;
+          if (!connected) suppressEventWs();
+          if (eventConnectionRef.current === connection) eventConnectionRef.current = null;
+          cleanupConnection();
+          if (shouldReconnect) {
+            setTimeout(() => {
+              if (agentRunningRef.current) void connectEvents(sid);
+            }, 1000);
+          }
+        };
+      });
+    };
+
+    const connectViaFetchStream = (): Promise<void> => {
+      if (isEventStreamSuppressed()) return Promise.resolve();
+
+      const controller = new AbortController();
+      const connection: AgentEventConnection = {
+        close: () => controller.abort(),
+      };
+      eventConnectionRef.current = connection;
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let connected = false;
+        let connectTimedOut = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(readyTimeout);
+          resolve();
+        };
+        const readyTimeout = setTimeout(settle, 1500);
+        const connectTimeout = setTimeout(() => {
+          if (connected || controller.signal.aborted || eventConnectionRef.current !== connection) return;
+          connectTimedOut = true;
+          suppressEventStream();
+          eventConnectionRef.current = null;
+          controller.abort();
+          settle();
+        }, EVENT_CONNECT_TIMEOUT_MS);
+
+        markConnected = () => {
+          if (connected) return;
+          connected = true;
+          clearTimeout(connectTimeout);
+          clearEventStreamSuppression();
+          settle();
+        };
+
+        const cleanupConnection = () => {
+          clearTimeout(connectTimeout);
+          settle();
+        };
+
+        const reconnect = () => {
+          cleanupConnection();
+          if (!connectTimedOut && eventConnectionRef.current === connection && agentRunningRef.current) {
+            eventConnectionRef.current = null;
+            setTimeout(() => {
+              if (agentRunningRef.current) void connectEvents(sid);
+            }, 1000);
+          }
+        };
+
+        void (async () => {
+          try {
+            const res = await fetch(`/api/agent/${encodeURIComponent(sid)}/events`, {
+              method: "POST",
+              headers: {
+                Accept: "text/event-stream",
+                "Cache-Control": "no-cache",
+              },
+              signal: controller.signal,
+            });
+            if (!res.ok || !res.body) {
+              clearTimeout(connectTimeout);
+              reconnect();
+              return;
+            }
+
+            const reader = res.body.getReader();
+            while (eventConnectionRef.current === connection) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (!value) continue;
+              sseBuffer += streamDecoder.decode(value, { stream: true });
+              processSseBuffer();
+            }
+            reconnect();
+          } catch {
+            if (!controller.signal.aborted) {
+              reconnect();
+            } else {
+              cleanupConnection();
+            }
+          }
+        })();
+      });
+    };
+
+    return connectViaWebSocket().then((usable) => (
+      usable ? undefined : connectViaFetchStream()
+    ));
   }, []);
 
   const respondToExtensionUi = useCallback(async (

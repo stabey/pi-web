@@ -24,7 +24,7 @@ Browser                Next.js Server              AgentSession (in-process)
   │                        │   startRpcSession() ─────────▶│ createAgentSession()
   │                        │   session.send(cmd) ─────────▶│ session.prompt()
   │                        │                               │
-  ├─ event stream ─────────▶ POST /api/agent/[id]/events   │
+  ├─ event stream ─────────▶ WS /api/agent/[id]/ws         │
   │                        │   session.onEvent() ◀─────────│ session.subscribe()
   │◀── data: {...} ─────────│                               │
 ```
@@ -55,6 +55,9 @@ lib/
   types.ts            shared TypeScript types
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
   system-prompt-off.ts  minimal system prompt when all tools are disabled
+
+server/
+  ws-events-proxy.js  WebSocket event proxy; browser WS -> local Next SSE
 
 components/
   AppShell.tsx        layout + URL state + tab management
@@ -102,7 +105,7 @@ Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[
 `GET /api/models` returns `defaultModel` read from `~/.pi/agent/settings.json`. `ChatWindow` pre-selects this on mount for new sessions.
 
 ### Agent event stream reconnect
-On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, the event stream is reconnected automatically through `POST /api/agent/[id]/events` with a `text/event-stream` response. `GET` is kept for legacy EventSource clients, and prompt settlement also polls `GET /api/agent/[id]` so corporate proxies that close SSE streams still converge after refresh or fallback polling. `thinkingLevel` and `isCompacting` are also synced from this response.
+On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, the event stream is reconnected automatically. The browser first tries `WS /api/agent/[id]/ws`; Docker starts `server/ws-events-proxy.js` on port `30142`, and Caddy routes that path to the proxy. The proxy opens local `POST /api/agent/[id]/events` and forwards SSE frames over WebSocket. If WS is unavailable, the browser falls back to the POST `text/event-stream` path. `GET` is kept for legacy EventSource clients, and prompt settlement also polls `GET /api/agent/[id]` so corporate proxies that close streams still converge. `thinkingLevel` and `isCompacting` are also synced from this response.
 
 ### Compaction SSE events
 Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `auto_compaction_start` / `auto_compaction_end`. `handleAgentEvent` accepts both sets to keep `isCompacting` in sync. Manual compact is a blocking POST — the button stays disabled until the response returns.

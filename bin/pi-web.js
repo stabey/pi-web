@@ -12,6 +12,7 @@ const { parseArgs } = require("util");
 
 const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
+const wsProxyEntry = path.join(pkgDir, "server", "ws-events-proxy.js");
 
 // Resolve next's CLI entry directly to avoid relying on .bin symlinks (which
 // may not exist when installed via npx).
@@ -38,6 +39,7 @@ const { values: cliArgs } = parseArgs({
 
 const port     = cliArgs.port     ?? process.env.PORT     ?? "30141";
 const hostname = cliArgs.hostname ?? process.env.HOSTNAME ?? null;
+const wsPort   = process.env.PI_WEB_WS_PORT ?? "30142";
 
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
@@ -54,6 +56,26 @@ const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   stdio: ["inherit", "pipe", "inherit"],
   env: { ...process.env },
 });
+
+const wsChild = spawn(process.execPath, [wsProxyEntry], {
+  cwd: pkgDir,
+  stdio: ["inherit", "inherit", "inherit"],
+  env: {
+    ...process.env,
+    PI_WEB_WS_PORT: wsPort,
+    PI_WEB_NEXT_ORIGIN: process.env.PI_WEB_NEXT_ORIGIN || `http://127.0.0.1:${port}`,
+  },
+});
+
+let shuttingDown = false;
+
+function shutdown(code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  child.kill("SIGTERM");
+  wsChild.kill("SIGTERM");
+  setTimeout(() => process.exit(code), 2000).unref();
+}
 
 let browserOpened = false;
 const openBrowser = process.env.PI_WEB_OPEN_BROWSER !== "false";
@@ -74,4 +96,13 @@ child.stdout.on("data", (chunk) => {
   }
 });
 
-child.on("exit", (code) => process.exit(code ?? 0));
+child.on("exit", (code) => {
+  if (!shuttingDown) shutdown(code ?? 0);
+});
+
+wsChild.on("exit", (code) => {
+  if (!shuttingDown) shutdown(code ?? 0);
+});
+
+process.on("SIGTERM", () => shutdown(0));
+process.on("SIGINT", () => shutdown(0));

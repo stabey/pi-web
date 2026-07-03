@@ -16,6 +16,7 @@
   },
   "files": [
     "bin",
+    "server",
     ".next",
     "!.next/cache",
     "!.next/dev",
@@ -27,7 +28,7 @@
   "scripts": {
     "dev": "next dev -p 30141",
     "build": "next build --webpack",
-    "start": "next start -p 30141",
+    "start": "node bin/pi-web.js --hostname 0.0.0.0 --port 30141",
     "lint": "eslint .",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
   },
@@ -49,7 +50,8 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",

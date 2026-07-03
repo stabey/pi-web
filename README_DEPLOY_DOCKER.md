@@ -55,7 +55,8 @@ docker compose up -d --build
 The app listens on the host loopback interface:
 
 ```text
-http://127.0.0.1:30141
+http://127.0.0.1:30141   Next.js app/API
+http://127.0.0.1:30142   WebSocket event proxy
 ```
 
 ## 4. Caddy Example
@@ -64,8 +65,14 @@ http://127.0.0.1:30141
 ai.example.com {
     encode gzip
 
-    reverse_proxy 127.0.0.1:30141 {
-        flush_interval -1
+    handle /api/agent/*/ws {
+        reverse_proxy 127.0.0.1:30142
+    }
+
+    handle {
+        reverse_proxy 127.0.0.1:30141 {
+            flush_interval -1
+        }
     }
 
     request_body {
@@ -100,5 +107,5 @@ tested `baseUrl` examples, compatibility options, and model test behavior.
 - All pages and APIs are protected when `PI_WEB_AUTH_REQUIRED=true`.
 - Chat mode uses `/data/chat/default` and does not expose file browsing.
 - Coding mode accepts only paths under `PI_WEB_WORKSPACE_ROOTS`.
-- The compose file binds `30141` to `127.0.0.1` so the public entrypoint is the host proxy.
+- The compose file binds `30141` and `30142` to `127.0.0.1` so the public entrypoint is the host proxy.
 - Do not mount `/`, `/home`, `/root`, `/etc`, or `/var/run/docker.sock`.
