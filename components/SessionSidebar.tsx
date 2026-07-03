@@ -30,6 +30,15 @@ interface WorkspaceInfo {
 }
 
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
+const RUNNING_STATUS_CONNECT_TIMEOUT_MS = 12_000;
+const RUNNING_STATUS_POLL_MS = 5_000;
+
+function createRunningStatusWsUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const url = new URL("/api/agent/running/ws", window.location.href);
+  url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
 
 function loadUnreadSessionIds(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -252,9 +261,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
-  // Once the SSE stream has delivered a frame it is the source of truth for
+  // Once the live stream has delivered a frame it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
-  const sseAuthoritativeRef = useRef(false);
+  const runningStatusAuthoritativeRef = useRef(false);
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -265,9 +274,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { sessions: SessionInfo[]; runningSessionIds?: string[] };
       setAllSessions(data.sessions);
-      // Treat the fetched running set as an initial fallback only. Once SSE is
-      // live it owns this state, so a slow fetch can't revive a stale snapshot.
-      if (!sseAuthoritativeRef.current) {
+      // Treat the fetched running set as an initial/polling fallback only.
+      // Once the live stream is active it owns this state, so a slow fetch
+      // can't revive a stale snapshot.
+      if (!runningStatusAuthoritativeRef.current) {
         setRunningSessionIds(new Set(data.runningSessionIds ?? []));
       }
       // Drop unread markers for sessions that no longer exist (e.g. deleted).
@@ -304,25 +314,108 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [unreadSessionIds]);
 
   useEffect(() => {
-    // Live running status via SSE — no polling. The server pushes the current
-    // set of running session ids whenever any session starts/stops working.
-    const source = new EventSource("/api/agent/running/events");
+    let closed = false;
+    let ws: WebSocket | null = null;
+    let connectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-    source.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data) as { type?: string; runningSessionIds?: string[] };
-        if (data.type === "running") {
-          sseAuthoritativeRef.current = true;
-          setRunningSessionIds(new Set(data.runningSessionIds ?? []));
-        }
-      } catch {
-        // ignore malformed frames
+    const clearConnectTimer = () => {
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
       }
     };
 
-    // On error EventSource auto-reconnects; keep the last known state meanwhile.
-    return () => source.close();
-  }, []);
+    const applyRunningStatus = (ids: string[]) => {
+      runningStatusAuthoritativeRef.current = true;
+      setRunningSessionIds(new Set(ids));
+    };
+
+    const startPolling = () => {
+      if (closed || pollTimer) return;
+      runningStatusAuthoritativeRef.current = false;
+      void loadSessions(false);
+      pollTimer = setInterval(() => {
+        runningStatusAuthoritativeRef.current = false;
+        void loadSessions(false);
+      }, RUNNING_STATUS_POLL_MS);
+    };
+
+    const scheduleReconnect = (connectWebSocket: () => void) => {
+      if (closed || reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connectWebSocket();
+      }, 1000);
+    };
+
+    const connectWebSocket = () => {
+      if (closed) return;
+      if (typeof WebSocket === "undefined") {
+        startPolling();
+        return;
+      }
+      const url = createRunningStatusWsUrl();
+      if (!url) {
+        startPolling();
+        return;
+      }
+
+      let receivedFrame = false;
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        startPolling();
+        return;
+      }
+
+      connectTimer = setTimeout(() => {
+        if (closed || receivedFrame) return;
+        ws?.close(1000, "running status timeout");
+        startPolling();
+      }, RUNNING_STATUS_CONNECT_TIMEOUT_MS);
+
+      ws.onmessage = (event) => {
+        if (typeof event.data !== "string") return;
+        try {
+          const envelope = JSON.parse(event.data) as { event?: unknown; data?: unknown };
+          if (envelope.event === "ping" || typeof envelope.data !== "string") return;
+          const data = JSON.parse(envelope.data) as { type?: string; runningSessionIds?: string[] };
+          if (data.type === "running") {
+            receivedFrame = true;
+            clearConnectTimer();
+            applyRunningStatus(data.runningSessionIds ?? []);
+          }
+        } catch {
+          // ignore malformed frames
+        }
+      };
+
+      ws.onerror = () => {
+        if (!receivedFrame) startPolling();
+      };
+
+      ws.onclose = () => {
+        clearConnectTimer();
+        ws = null;
+        if (closed) return;
+        if (receivedFrame) scheduleReconnect(connectWebSocket);
+        else startPolling();
+      };
+    };
+
+    connectWebSocket();
+
+    return () => {
+      closed = true;
+      runningStatusAuthoritativeRef.current = false;
+      clearConnectTimer();
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (pollTimer) clearInterval(pollTimer);
+      ws?.close(1000, "client close");
+    };
+  }, [loadSessions]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;

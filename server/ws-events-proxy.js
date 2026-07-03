@@ -18,11 +18,16 @@ function sendClose(socket, statusCode, message) {
   socket.destroy();
 }
 
-function parseSessionId(pathname) {
+function parseSseProxyTarget(pathname) {
+  if (pathname === "/api/agent/running/ws") {
+    return { method: "GET", path: "/api/agent/running/events" };
+  }
+
   const match = pathname.match(/^\/api\/agent\/([^/]+)\/ws$/);
   if (!match) return null;
   try {
-    return decodeURIComponent(match[1]);
+    const sessionId = decodeURIComponent(match[1]);
+    return { method: "POST", path: `/api/agent/${encodeURIComponent(sessionId)}/events` };
   } catch {
     return null;
   }
@@ -50,8 +55,8 @@ function parseSseFrames(buffer, onFrame) {
   }
 }
 
-function proxyEventsToWebSocket(ws, req, sessionId) {
-  const target = new URL(`/api/agent/${encodeURIComponent(sessionId)}/events`, nextOrigin);
+function proxyEventsToWebSocket(ws, req, proxyTarget) {
+  const target = new URL(proxyTarget.path, nextOrigin);
   const decoder = new StringDecoder("utf8");
   const sseBuffer = { value: "" };
   let upstreamReq = null;
@@ -71,7 +76,7 @@ function proxyEventsToWebSocket(ws, req, sessionId) {
   };
 
   upstreamReq = http.request(target, {
-    method: "POST",
+    method: proxyTarget.method,
     headers: {
       Accept: "text/event-stream",
       "Cache-Control": "no-cache",
@@ -137,13 +142,13 @@ const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 server.on("upgrade", (req, socket, head) => {
   const host = req.headers.host || "localhost";
   const url = new URL(req.url || "/", `http://${host}`);
-  const sessionId = parseSessionId(url.pathname);
-  if (!sessionId) {
+  const proxyTarget = parseSseProxyTarget(url.pathname);
+  if (!proxyTarget) {
     sendClose(socket, 404, "Not Found");
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    proxyEventsToWebSocket(ws, req, sessionId);
+    proxyEventsToWebSocket(ws, req, proxyTarget);
   });
 });
 
