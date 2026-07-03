@@ -8,8 +8,10 @@ import { readTransportConfig } from "@/lib/transport-config";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/agent/[id]/events - SSE stream of agent events
-export async function GET(
+const HEARTBEAT_INTERVAL_MS = 8_000;
+
+// POST /api/agent/[id]/events is the primary streaming path. GET stays for legacy EventSource clients.
+async function streamAgentEvents(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -75,14 +77,14 @@ export async function GET(
         encode(event);
       });
 
-      // Heartbeat every 30s to prevent server/proxy timeout (Next.js default ~120-150s)
+      // Send an explicit data heartbeat for proxy stacks that do not preserve SSE comments.
       const heartbeat = setInterval(() => {
         try {
-          controller.enqueue(new TextEncoder().encode(":\n\n"));
+          enqueue(`event: ping\ndata: ${JSON.stringify({ type: "ping", timestamp: Date.now() })}\n\n`);
         } catch {
           // controller already closed
         }
-      }, 30_000);
+      }, HEARTBEAT_INTERVAL_MS);
 
       // Cleanup when client disconnects
       const cleanup = () => {
@@ -102,6 +104,21 @@ export async function GET(
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
+      "X-Pi-SSE-Heartbeat-Seconds": String(HEARTBEAT_INTERVAL_MS / 1000),
     },
   });
+}
+
+export async function GET(
+  req: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  return streamAgentEvents(req, context);
+}
+
+export async function POST(
+  req: Request,
+  context: { params: Promise<{ id: string }> }
+) {
+  return streamAgentEvents(req, context);
 }

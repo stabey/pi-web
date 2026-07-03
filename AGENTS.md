@@ -24,7 +24,7 @@ Browser                Next.js Server              AgentSession (in-process)
   │                        │   startRpcSession() ─────────▶│ createAgentSession()
   │                        │   session.send(cmd) ─────────▶│ session.prompt()
   │                        │                               │
-  ├─ SSE connect ──────────▶ GET /api/agent/[id]/events    │
+  ├─ event stream ─────────▶ POST /api/agent/[id]/events   │
   │                        │   session.onEvent() ◀─────────│ session.subscribe()
   │◀── data: {...} ─────────│                               │
 ```
@@ -44,7 +44,7 @@ app/api/
   sessions/new/route.ts           returns 410 (no longer used)
   agent/new/route.ts              POST { cwd, message, toolNames?, provider?, modelId? }
   agent/[id]/route.ts             GET state | POST any command
-  agent/[id]/events/route.ts      GET SSE stream
+  agent/[id]/events/route.ts      POST fetch SSE stream | GET legacy SSE stream
   files/[...path]/route.ts        GET file contents for viewer
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/POST — read/write ~/.pi/agent/models.json
@@ -101,8 +101,8 @@ Tool names are passed at session creation (`POST /api/agent/new` → `toolNames[
 ### Model defaults for new sessions
 `GET /api/models` returns `defaultModel` read from `~/.pi/agent/settings.json`. `ChatWindow` pre-selects this on mount for new sessions.
 
-### SSE reconnect on page refresh mid-stream
-On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, SSE is reconnected automatically. `thinkingLevel` and `isCompacting` are also synced from this response.
+### Agent event stream reconnect
+On `ChatWindow` mount, `GET /api/agent/[id]` is called. If `state.isStreaming === true`, the event stream is reconnected automatically through `POST /api/agent/[id]/events` with a `text/event-stream` response. `GET` is kept for legacy EventSource clients, and prompt settlement also polls `GET /api/agent/[id]` so corporate proxies that close SSE streams still converge after refresh or fallback polling. `thinkingLevel` and `isCompacting` are also synced from this response.
 
 ### Compaction SSE events
 Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `auto_compaction_start` / `auto_compaction_end`. `handleAgentEvent` accepts both sets to keep `isCompacting` in sync. Manual compact is a blocking POST — the button stays disabled until the response returns.

@@ -63,6 +63,10 @@ interface AgentEvent {
   [key: string]: unknown;
 }
 
+type AgentEventConnection = {
+  close: () => void;
+};
+
 interface CompactCommandResult {
   tokensBefore?: number;
   estimatedTokensAfter?: number;
@@ -294,7 +298,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventConnectionRef = useRef<AgentEventConnection | null>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const agentRunningRef = useRef(false);
   const handleAgentEventRef = useRef<((event: AgentEvent) => void) | null>(null);
@@ -493,17 +497,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [ensureNewSession]);
 
   const connectEvents = useCallback((sid: string): Promise<void> => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
-    eventSourceRef.current = es;
+    eventConnectionRef.current?.close();
+    eventConnectionRef.current = null;
+
+    const controller = new AbortController();
+    const connection: AgentEventConnection = {
+      close: () => controller.abort(),
+    };
+    eventConnectionRef.current = connection;
 
     return new Promise((resolve) => {
       let settled = false;
       const binaryEvents = new Map<string, { chunks: (Uint8Array | undefined)[]; total: number }>();
       const decoder = new TextDecoder();
+      const streamDecoder = new TextDecoder();
+      let sseBuffer = "";
       const settle = () => {
         if (settled) return;
         settled = true;
@@ -522,12 +530,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
       };
 
-      es.onmessage = (e) => {
-        handleRawEvent(e.data);
-      };
-      es.addEventListener("binary_chunk", (event) => {
+      const handleBinaryChunk = (raw: string) => {
         try {
-          const chunk = JSON.parse((event as MessageEvent).data) as {
+          const chunk = JSON.parse(raw) as {
             id?: unknown;
             seq?: unknown;
             total?: unknown;
@@ -544,10 +549,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         } catch {
           // ignore malformed transport chunks
         }
-      });
-      es.addEventListener("binary_done", (event) => {
+      };
+
+      const handleBinaryDone = (raw: string) => {
         try {
-          const done = JSON.parse((event as MessageEvent).data) as { id?: unknown };
+          const done = JSON.parse(raw) as { id?: unknown };
           if (typeof done.id !== "string") return;
           const entry = binaryEvents.get(done.id);
           if (!entry || entry.chunks.some((chunk) => !chunk)) return;
@@ -557,17 +563,82 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         } catch {
           // ignore malformed transport completion
         }
-      });
-      es.onerror = () => {
+      };
+
+      const handleSseEvent = (eventName: string, data: string) => {
+        if (eventName === "ping") return;
+        if (eventName === "binary_chunk") {
+          handleBinaryChunk(data);
+          return;
+        }
+        if (eventName === "binary_done") {
+          handleBinaryDone(data);
+          return;
+        }
+        handleRawEvent(data);
+      };
+
+      const processSseBuffer = () => {
+        sseBuffer = sseBuffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        let boundary = sseBuffer.indexOf("\n\n");
+        while (boundary !== -1) {
+          const frame = sseBuffer.slice(0, boundary);
+          sseBuffer = sseBuffer.slice(boundary + 2);
+          boundary = sseBuffer.indexOf("\n\n");
+
+          let eventName = "message";
+          const dataLines: string[] = [];
+          for (const line of frame.split("\n")) {
+            if (!line || line.startsWith(":")) continue;
+            if (line.startsWith("event:")) {
+              eventName = line.slice(6).trimStart();
+            } else if (line.startsWith("data:")) {
+              dataLines.push(line.slice(5).replace(/^ /, ""));
+            }
+          }
+          if (dataLines.length === 0) continue;
+          handleSseEvent(eventName, dataLines.join("\n"));
+        }
+      };
+
+      const reconnect = () => {
         settle();
-        if (eventSourceRef.current === es && agentRunningRef.current) {
-          es.close();
-          eventSourceRef.current = null;
+        if (eventConnectionRef.current === connection && agentRunningRef.current) {
+          eventConnectionRef.current = null;
           setTimeout(() => {
             if (agentRunningRef.current) void connectEvents(sid);
           }, 1000);
         }
       };
+
+      void (async () => {
+        try {
+          const res = await fetch(`/api/agent/${encodeURIComponent(sid)}/events`, {
+            method: "POST",
+            headers: {
+              Accept: "text/event-stream",
+              "Cache-Control": "no-cache",
+            },
+            signal: controller.signal,
+          });
+          if (!res.ok || !res.body) {
+            reconnect();
+            return;
+          }
+
+          const reader = res.body.getReader();
+          while (eventConnectionRef.current === connection) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (!value) continue;
+            sseBuffer += streamDecoder.decode(value, { stream: true });
+            processSseBuffer();
+          }
+          reconnect();
+        } catch {
+          if (!controller.signal.aborted) reconnect();
+        }
+      })();
     });
   }, []);
 
@@ -1215,8 +1286,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     }
     return () => {
-      eventSourceRef.current?.close();
-      eventSourceRef.current = null;
+      eventConnectionRef.current?.close();
+      eventConnectionRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1340,7 +1411,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentPhase,
     isNew,
     // Refs
-    sessionIdRef, eventSourceRef, messagesEndRef, scrollContainerRef,
+    sessionIdRef, eventConnectionRef, messagesEndRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,
     // Actions
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
