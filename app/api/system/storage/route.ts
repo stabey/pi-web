@@ -1,10 +1,11 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { collectStorageUsage } from "@/lib/storage-usage";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+async function GET__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -14,3 +15,5 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

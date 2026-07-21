@@ -1,9 +1,10 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { readUploadMeta } from "@/lib/upload-store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(
+async function GET__secureImpl(
   _req: Request,
   { params }: { params: Promise<{ assetId: string }> },
 ) {
@@ -24,3 +25,5 @@ export async function GET(
     return NextResponse.json({ error: String(error) }, { status: 404 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

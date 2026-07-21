@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename } from "path";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 // GET /api/skills?cwd=<path>
 // Uses DefaultResourceLoader (same logic as AgentSession startup) so settings.json
 // skill paths, package skills, and .agents/skills directories are all included.
-export async function GET(req: Request) {
+async function GET__secureImpl(req: Request) {
   const { searchParams } = new URL(req.url);
   const cwdResult = validateKnownCwd(searchParams.get("cwd"));
   if (!cwdResult.ok) return NextResponse.json({ error: cwdResult.error }, { status: cwdResult.status });
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
 }
 
 // PATCH /api/skills — toggle disable-model-invocation on a SKILL.md file
-export async function PATCH(req: Request) {
+async function PATCH__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -74,3 +75,6 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const PATCH = withSecureRoute(PATCH__secureImpl);

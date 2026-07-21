@@ -1,6 +1,8 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { readTransportConfig } from "@/lib/transport-config";
 import { createUpload, IMAGE_MIME_ALLOWLIST } from "@/lib/upload-store";
+import { MAX_FILE_BYTES, isTextFile } from "@/lib/attachments";
 
 export const dynamic = "force-dynamic";
 
@@ -16,19 +18,37 @@ function sha256From(input: unknown): string | null {
   return typeof input === "string" && /^[a-f0-9]{64}$/i.test(input) ? input.toLowerCase() : null;
 }
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   try {
     const body = await req.json() as Record<string, unknown>;
     const mimeType = typeof body.mimeType === "string" ? body.mimeType : "";
+    const category = body.category === "file" ? "file" : "image";
+    const fileName = typeof body.fileName === "string" ? body.fileName.slice(0, 255) : undefined;
     const originalBytes = numberFrom(body.originalBytes);
     const sha256 = sha256From(body.sha256);
-    if (!IMAGE_MIME_ALLOWLIST.has(mimeType) || originalBytes === null || !sha256) {
+
+    if (originalBytes === null || !sha256) {
       return NextResponse.json({ error: "Invalid asset metadata" }, { status: 400 });
     }
 
     const config = readTransportConfig();
-    if (originalBytes > config.assetMaxBytes) {
-      return NextResponse.json({ error: "Asset is too large" }, { status: 413 });
+
+    if (category === "file") {
+      // Text/code upload: validated by filename (extensions are more reliable
+      // than browser-reported MIME types for source files).
+      if (!fileName || !isTextFile(fileName, mimeType)) {
+        return NextResponse.json({ error: "Unsupported file type" }, { status: 400 });
+      }
+      if (originalBytes > MAX_FILE_BYTES) {
+        return NextResponse.json({ error: "File is too large" }, { status: 413 });
+      }
+    } else {
+      if (!IMAGE_MIME_ALLOWLIST.has(mimeType)) {
+        return NextResponse.json({ error: "Invalid asset metadata" }, { status: 400 });
+      }
+      if (originalBytes > config.assetMaxBytes) {
+        return NextResponse.json({ error: "Asset is too large" }, { status: 413 });
+      }
     }
 
     const expiresAt = Date.now() + ASSET_TTL_MS;
@@ -39,8 +59,8 @@ export async function POST(req: Request) {
       compressedBytes: originalBytes,
       sha256,
       expiresAt,
-      mimeType,
-      fileName: typeof body.fileName === "string" ? body.fileName.slice(0, 255) : undefined,
+      mimeType: mimeType || (category === "file" ? "text/plain" : ""),
+      fileName,
     });
     const maxChunkBytes = Math.max(128, config.maxChunkBytes - config.safetyMarginBytes);
 
@@ -49,3 +69,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 400 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

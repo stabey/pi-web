@@ -1,8 +1,9 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function GET__secureImpl() {
   const authStorage = AuthStorage.create();
   const providers = authStorage.getOAuthProviders();
 
@@ -28,3 +29,5 @@ export async function GET() {
 
   return Response.json({ providers: result });
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

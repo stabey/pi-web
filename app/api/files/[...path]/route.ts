@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
@@ -275,7 +276,7 @@ ${bodyHtml}
 </html>`;
 }
 
-export async function GET(
+async function GET__secureImpl(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
@@ -451,3 +452,5 @@ export async function GET(
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

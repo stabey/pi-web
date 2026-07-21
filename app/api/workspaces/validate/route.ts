@@ -1,7 +1,8 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { validateWorkspaceCwd } from "@/lib/server-config";
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   try {
     const body = await req.json() as { cwd?: unknown };
     const result = validateWorkspaceCwd(body.cwd);
@@ -13,3 +14,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

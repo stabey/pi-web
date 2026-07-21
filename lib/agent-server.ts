@@ -12,25 +12,58 @@ import {
 } from "@/lib/agent-modes";
 import { allowFileRoot } from "@/lib/file-access";
 import { ensureChatCwd, getModeForCwd, validateWorkspaceCwd } from "@/lib/server-config";
-import { readAssetAsImage } from "@/lib/upload-store";
+import { readAssetAsImage, readAssetAsText } from "@/lib/upload-store";
 
 export type AgentActionResult = {
   status?: number;
   body: Record<string, unknown>;
 };
 
-async function resolveCommandAssets(command: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const assetIds = command.imageAssetIds;
-  if (!Array.isArray(assetIds) || assetIds.length === 0) return command;
-
-  const assetImages = assetIds.map((assetId) => {
-    if (typeof assetId !== "string") throw new Error("Invalid image asset id");
-    return readAssetAsImage(assetId);
+function buildFilePreamble(files: { name: string; text: string }[]): string {
+  const blocks = files.map((file) => {
+    const fence = "````";
+    return `${fence} file name="${file.name}"\n${file.text}\n${fence}`;
   });
-  const existingImages = Array.isArray(command.images) ? command.images : [];
-  const { imageAssetIds: _imageAssetIds, ...rest } = command;
+  const heading = files.length === 1
+    ? "The user attached the following file:"
+    : `The user attached the following ${files.length} files:`;
+  return `${heading}\n\n${blocks.join("\n\n")}`;
+}
+
+async function resolveCommandAssets(command: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const imageAssetIds = command.imageAssetIds;
+  const fileAssetIds = command.fileAssetIds;
+  const hasImages = Array.isArray(imageAssetIds) && imageAssetIds.length > 0;
+  const hasFiles = Array.isArray(fileAssetIds) && fileAssetIds.length > 0;
+  if (!hasImages && !hasFiles) return command;
+
+  const { imageAssetIds: _imageAssetIds, fileAssetIds: _fileAssetIds, ...rest } = command;
   void _imageAssetIds;
-  return { ...rest, images: [...existingImages, ...assetImages] };
+  void _fileAssetIds;
+  const result: Record<string, unknown> = { ...rest };
+
+  if (hasImages) {
+    const assetImages = (imageAssetIds as unknown[]).map((assetId) => {
+      if (typeof assetId !== "string") throw new Error("Invalid image asset id");
+      return readAssetAsImage(assetId);
+    });
+    const existingImages = Array.isArray(command.images) ? command.images : [];
+    result.images = [...existingImages, ...assetImages];
+  }
+
+  if (hasFiles) {
+    const files = (fileAssetIds as unknown[]).map((assetId) => {
+      if (typeof assetId !== "string") throw new Error("Invalid file asset id");
+      return readAssetAsText(assetId);
+    });
+    const preamble = buildFilePreamble(files);
+    const existingMessage = typeof result.message === "string" ? result.message : "";
+    result.message = existingMessage
+      ? `${preamble}\n\n${existingMessage}`
+      : preamble;
+  }
+
+  return result;
 }
 
 export async function createNewAgentCommand(body: Record<string, unknown>): Promise<AgentActionResult> {

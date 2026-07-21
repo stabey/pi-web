@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -110,7 +111,7 @@ function projectTreeForResponse<T extends { entry: { id: string }; children: T[]
   return projectedRoots;
 }
 
-export async function GET(
+async function GET__secureImpl(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -177,7 +178,7 @@ export async function GET(
 }
 
 // PATCH /api/sessions/[id]  body: { name: string }
-export async function PATCH(
+async function PATCH__secureImpl(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -200,7 +201,7 @@ export async function PATCH(
 }
 
 // DELETE /api/sessions/[id]
-export async function DELETE(
+async function DELETE__secureImpl(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -248,3 +249,7 @@ export async function DELETE(
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const PATCH = withSecureRoute(PATCH__secureImpl);
+export const DELETE = withSecureRoute(DELETE__secureImpl);

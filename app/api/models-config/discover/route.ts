@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { discoverProviderModels, readCachedProviderModels, writeCachedProviderModels } from "@/lib/model-discovery";
@@ -8,7 +9,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -29,3 +30,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

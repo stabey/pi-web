@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
@@ -46,7 +47,7 @@ function findExistingModel(provider: Record<string, unknown> | undefined, modelI
   ));
 }
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -137,3 +138,5 @@ export async function POST(req: Request) {
     if (tempDir) rmSync(tempDir, { recursive: true, force: true });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

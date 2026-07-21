@@ -1,9 +1,10 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { commitUpload } from "@/lib/upload-store";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
+async function POST__secureImpl(
   req: Request,
   { params }: { params: Promise<{ uploadId: string }> },
 ) {
@@ -16,3 +17,5 @@ export async function POST(
     return NextResponse.json({ error: String(error) }, { status: 400 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
@@ -101,7 +102,7 @@ async function exportSession(filePath: string, outputPath: string): Promise<void
   await exportFromFile(filePath, outputPath);
 }
 
-export async function GET(
+async function GET__secureImpl(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -138,3 +139,5 @@ export async function GET(
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

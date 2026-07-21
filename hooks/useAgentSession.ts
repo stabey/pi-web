@@ -285,6 +285,22 @@ export interface AttachedImage {
   previewUrl: string;
 }
 
+export interface AttachedFile {
+  name: string;
+  mimeType: string;
+  size: number;
+  data: string;
+}
+
+function toPiFiles(files?: AttachedFile[]) {
+  return files?.map((file) => ({ type: "file" as const, name: file.name, mimeType: file.mimeType, data: file.data }));
+}
+
+function fileNote(files?: AttachedFile[]): string {
+  if (!files?.length) return "";
+  return `\n\n${files.map((f) => `📎 ${f.name}`).join("  ")}`;
+}
+
 type SelectedModel = { provider: string; modelId: string };
 type ModelEntry = { id: string; name: string; provider: string };
 type ModelsResponse = {
@@ -1061,19 +1077,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [addNotice, finishPromptWithoutStream, handleExtensionUiRequest, loadSession, onAgentEnd]);
   handleAgentEventRef.current = handleAgentEvent;
 
-  const handleSend = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleSend = useCallback(async (message: string, images?: AttachedImage[], files?: AttachedFile[]) => {
     const trimmedMessage = message.trim();
-    if (!trimmedMessage && !images?.length) return;
+    if (!trimmedMessage && !images?.length && !files?.length) return;
     if (agentRunning) return;
-    const isSlashCommandPrompt = !images?.length && trimmedMessage.startsWith("/");
+    const isSlashCommandPrompt = !images?.length && !files?.length && trimmedMessage.startsWith("/");
     const promptRunId = promptRunIdRef.current + 1;
 
+    const displayText = message + fileNote(files);
     const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
     const userMsg: AgentMessage = {
       role: "user",
       content: imageBlocks?.length
-        ? [...(message.trim() ? [{ type: "text" as const, text: message }] : []), ...imageBlocks]
-        : message,
+        ? [...(displayText.trim() ? [{ type: "text" as const, text: displayText }] : []), ...imageBlocks]
+        : displayText,
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -1086,6 +1103,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     completionScrollAllowedRef.current = true;
 
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    const piFiles = toPiFiles(files);
 
     try {
       let sentSessionId: string | null = null;
@@ -1104,6 +1122,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             type: "prompt",
             message,
             ...(piImages?.length ? { images: piImages } : {}),
+            ...(piFiles?.length ? { files: piFiles } : {}),
           });
           promoteNewSession(1, message);
         } else {
@@ -1126,6 +1145,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             type: "prompt",
             message,
             ...(piImages?.length ? { images: piImages } : {}),
+            ...(piFiles?.length ? { files: piFiles } : {}),
           });
           promoteNewSession(1, message);
         }
@@ -1136,6 +1156,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "prompt",
           message,
           ...(piImages?.length ? { images: piImages } : {}),
+          ...(piFiles?.length ? { files: piFiles } : {}),
         });
       }
       if (sentSessionId) {
@@ -1310,16 +1331,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [addNotice, ensureNewSession, isCompacting, loadSession, promoteNewSession, onSessionStatsPanelOpen]);
 
-  const handleSteer = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleSteer = useCallback(async (message: string, images?: AttachedImage[], files?: AttachedFile[]) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
-    setMessages((prev) => [...prev, { role: "user", content: `[steer] ${message}`, timestamp: Date.now() } as AgentMessage]);
+    setMessages((prev) => [...prev, { role: "user", content: `[steer] ${message}${fileNote(files)}`, timestamp: Date.now() } as AgentMessage]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    const piFiles = toPiFiles(files);
     try {
       await sendAgentCommand(sid, {
         type: "steer",
         message,
         ...(piImages?.length ? { images: piImages } : {}),
+        ...(piFiles?.length ? { files: piFiles } : {}),
       });
     } catch (e) {
       console.error("Failed to steer:", e);
@@ -1330,37 +1353,43 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
+    files?: AttachedFile[],
   ) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
+    const note = fileNote(files);
     setMessages((prev) => [...prev, {
       role: "user",
-      content: behavior === "steer" ? `[steer] ${message}` : message,
+      content: behavior === "steer" ? `[steer] ${message}${note}` : `${message}${note}`,
       timestamp: Date.now(),
     } as AgentMessage]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    const piFiles = toPiFiles(files);
     try {
       await sendAgentCommand(sid, {
         type: "prompt",
         message,
         streamingBehavior: behavior,
         ...(piImages?.length ? { images: piImages } : {}),
+        ...(piFiles?.length ? { files: piFiles } : {}),
       });
     } catch (e) {
       console.error("Failed to queue prompt:", e);
     }
   }, []);
 
-  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
+  const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[], files?: AttachedFile[]) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
-    setMessages((prev) => [...prev, { role: "user", content: message, timestamp: Date.now() } as AgentMessage]);
+    setMessages((prev) => [...prev, { role: "user", content: `${message}${fileNote(files)}`, timestamp: Date.now() } as AgentMessage]);
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
+    const piFiles = toPiFiles(files);
     try {
       await sendAgentCommand(sid, {
         type: "follow_up",
         message,
         ...(piImages?.length ? { images: piImages } : {}),
+        ...(piFiles?.length ? { files: piFiles } : {}),
       });
     } catch (e) {
       console.error("Failed to follow up:", e);

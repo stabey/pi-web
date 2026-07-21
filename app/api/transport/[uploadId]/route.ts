@@ -1,9 +1,10 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { deleteUpload } from "@/lib/upload-store";
 
 export const dynamic = "force-dynamic";
 
-export async function DELETE(
+async function DELETE__secureImpl(
   _req: Request,
   { params }: { params: Promise<{ uploadId: string }> },
 ) {
@@ -15,3 +16,5 @@ export async function DELETE(
     return NextResponse.json({ error: String(error) }, { status: 400 });
   }
 }
+
+export const DELETE = withSecureRoute(DELETE__secureImpl);

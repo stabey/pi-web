@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { getRunningRpcSessionIds, subscribeRunningSessions } from "@/lib/rpc-manager";
 
 export const dynamic = "force-dynamic";
@@ -5,7 +6,7 @@ export const dynamic = "force-dynamic";
 // GET /api/agent/running/events - SSE stream of the set of currently-running
 // session ids. Pushes an update whenever any session starts or stops working,
 // so the sidebar never has to poll.
-export async function GET(req: Request) {
+async function GET__secureImpl(req: Request) {
   const stream = new ReadableStream({
     start(controller) {
       const encode = (data: unknown) => {
@@ -54,3 +55,5 @@ export async function GET(req: Request) {
     },
   });
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

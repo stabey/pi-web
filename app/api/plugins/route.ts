@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync, statSync } from "fs";
 import { basename, dirname, extname, join, relative } from "path";
@@ -302,7 +303,7 @@ function readScope(scope: unknown): PluginScope {
   return scope === "project" ? "project" : "global";
 }
 
-export async function GET(req: Request) {
+async function GET__secureImpl(req: Request) {
   const { searchParams } = new URL(req.url);
   const cwdResult = validateKnownCwd(searchParams.get("cwd"));
   if (!cwdResult.ok) return NextResponse.json({ error: cwdResult.error }, { status: cwdResult.status });
@@ -315,7 +316,7 @@ export async function GET(req: Request) {
 }
 
 // POST /api/plugins body: { action, source?, scope?, cwd }
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -367,3 +368,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const POST = withSecureRoute(POST__secureImpl);

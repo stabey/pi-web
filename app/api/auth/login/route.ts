@@ -1,10 +1,11 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { getAdminUser, isAdminAuthRequired, setAdminCookie } from "@/lib/admin-auth";
 
 export const runtime = "nodejs";
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   try {
     const body = await req.json().catch(() => ({})) as { username?: unknown; password?: unknown };
     const username = typeof body.username === "string" ? body.username : "";
@@ -32,3 +33,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

@@ -1,9 +1,10 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { listAllSessions } from "@/lib/session-reader";
 import { getRunningRpcSessionIds } from "@/lib/rpc-manager";
 import { getModeForCwd } from "@/lib/server-config";
 
-export async function GET() {
+async function GET__secureImpl() {
   try {
     const sessions = await listAllSessions();
     return NextResponse.json({
@@ -17,3 +18,5 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

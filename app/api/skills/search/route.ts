@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { runNpx } from "@/lib/npx";
 
@@ -93,7 +94,7 @@ function parseInstallCount(installs: string): number {
 }
 
 // POST /api/skills/search  body: { query: string, limit?: number }
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   try {
     const { query, limit: rawLimit } = await req.json() as { query?: string; limit?: unknown };
     if (!query?.trim()) return NextResponse.json({ error: "query required" }, { status: 400 });
@@ -119,3 +120,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message ?? String(e) }, { status: 500 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

@@ -1,8 +1,9 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { createWorkspaceFolder } from "@/lib/workspace-manager";
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -13,3 +14,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

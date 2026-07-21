@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { createUpload, type TransportTarget } from "@/lib/upload-store";
 import { readTransportConfig, type BrowserCompression } from "@/lib/transport-config";
@@ -28,7 +29,7 @@ function targetFrom(input: unknown): TransportTarget | null {
   return null;
 }
 
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   try {
     const body = await req.json() as Record<string, unknown>;
     if (body.kind !== "agent-command") {
@@ -62,3 +63,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 400 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

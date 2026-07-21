@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import {
   normalizeTransportConfig,
@@ -7,11 +8,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+async function GET__secureImpl() {
   return NextResponse.json({ transport: readTransportConfig() });
 }
 
-export async function PUT(req: Request) {
+async function PUT__secureImpl(req: Request) {
   try {
     const body = await req.json();
     const transport = normalizeTransportConfig(body);
@@ -21,3 +22,6 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 400 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const PUT = withSecureRoute(PUT__secureImpl);

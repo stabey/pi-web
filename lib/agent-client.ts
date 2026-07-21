@@ -29,6 +29,13 @@ type AgentImage = {
   mimeType: string;
 };
 
+type AgentFile = {
+  type: "file";
+  name: string;
+  mimeType: string;
+  data: string; // base64
+};
+
 type AgentRouteResponse<T = unknown> = {
   success?: boolean;
   data?: T;
@@ -57,6 +64,8 @@ const DEFAULT_CLIENT_TRANSPORT_CONFIG: BrowserTransportConfig = {
 };
 
 const MAX_IMAGES_PER_MESSAGE = 4;
+const MAX_ATTACHMENTS_PER_MESSAGE = 10; // images + files combined
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const textEncoder = new TextEncoder();
 
 function normalizeConfig(input: unknown): BrowserTransportConfig {
@@ -225,6 +234,15 @@ async function uploadBytes(
   });
 }
 
+function readFile(input: unknown): AgentFile {
+  if (!input || typeof input !== "object") throw new Error("Invalid file attachment");
+  const file = input as Partial<AgentFile>;
+  if (file.type !== "file" || typeof file.data !== "string" || typeof file.mimeType !== "string" || typeof file.name !== "string") {
+    throw new Error("Invalid file attachment");
+  }
+  return { type: "file", name: file.name, mimeType: file.mimeType, data: file.data };
+}
+
 async function uploadAsset(image: AgentImage, config: BrowserTransportConfig): Promise<string> {
   const bytes = base64ToBytes(image.data);
   if (bytes.length > config.assetMaxBytes) throw new Error("Image is too large");
@@ -232,7 +250,26 @@ async function uploadAsset(image: AgentImage, config: BrowserTransportConfig): P
   const created = await requestJson<{ assetId: string; maxChunkBytes: number }>("/api/assets/create", {
     method: "POST",
     body: JSON.stringify({
+      category: "image",
       mimeType: image.mimeType,
+      originalBytes: bytes.length,
+      sha256,
+    }),
+  });
+  await uploadBytes(`/api/assets/${encodeURIComponent(created.assetId)}`, bytes, created.maxChunkBytes, sha256, config);
+  return created.assetId;
+}
+
+async function uploadFileAsset(file: AgentFile, config: BrowserTransportConfig): Promise<string> {
+  const bytes = base64ToBytes(file.data);
+  if (bytes.length > MAX_FILE_BYTES) throw new Error(`File is too large: ${file.name}`);
+  const sha256 = await sha256Hex(bytes);
+  const created = await requestJson<{ assetId: string; maxChunkBytes: number }>("/api/assets/create", {
+    method: "POST",
+    body: JSON.stringify({
+      category: "file",
+      mimeType: file.mimeType,
+      fileName: file.name,
       originalBytes: bytes.length,
       sha256,
     }),
@@ -246,13 +283,25 @@ async function prepareCommandAssets(
   config: BrowserTransportConfig,
 ): Promise<Record<string, unknown>> {
   const images = Array.isArray(command.images) ? command.images : [];
-  if (images.length === 0) return command;
+  const files = Array.isArray(command.files) ? command.files : [];
+  if (images.length === 0 && files.length === 0) return command;
   if (images.length > MAX_IMAGES_PER_MESSAGE) throw new Error("Too many images in one message");
+  if (images.length + files.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    throw new Error(`Too many attachments in one message (max ${MAX_ATTACHMENTS_PER_MESSAGE})`);
+  }
 
-  const assetIds = await Promise.all(images.map((image) => uploadAsset(readImage(image), config)));
-  const { images: _images, ...rest } = command;
+  const { images: _images, files: _files, ...rest } = command;
   void _images;
-  return { ...rest, imageAssetIds: assetIds };
+  void _files;
+
+  const result: Record<string, unknown> = { ...rest };
+  if (images.length > 0) {
+    result.imageAssetIds = await Promise.all(images.map((image) => uploadAsset(readImage(image), config)));
+  }
+  if (files.length > 0) {
+    result.fileAssetIds = await Promise.all(files.map((file) => uploadFileAsset(readFile(file), config)));
+  }
+  return result;
 }
 
 async function postPlain<T>(

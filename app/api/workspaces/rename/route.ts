@@ -1,8 +1,9 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { renameWorkspaceFolder } from "@/lib/workspace-manager";
 
-export async function PATCH(req: Request) {
+async function PATCH__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -13,3 +14,5 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
   }
 }
+
+export const PATCH = withSecureRoute(PATCH__secureImpl);

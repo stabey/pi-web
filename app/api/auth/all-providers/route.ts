@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
@@ -5,7 +6,7 @@ export const dynamic = "force-dynamic";
 // Providers that use OAuth — handled separately via /api/auth/providers
 const OAUTH_PROVIDER_IDS = new Set(["anthropic", "github-copilot", "openai-codex"]);
 
-export async function GET() {
+async function GET__secureImpl() {
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
   const all = registry.getAll();
@@ -40,3 +41,5 @@ export async function GET() {
 
   return Response.json({ providers: result });
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

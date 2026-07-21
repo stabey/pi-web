@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
@@ -7,7 +8,7 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ provider: string }> };
 
 // GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
-export async function GET(_req: Request, { params }: Params) {
+async function GET__secureImpl(_req: Request, { params }: Params) {
   const { provider } = await params;
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
@@ -18,7 +19,7 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 // POST /api/auth/api-key/[provider]  body: { apiKey: string }
-export async function POST(req: Request, { params }: Params) {
+async function POST__secureImpl(req: Request, { params }: Params) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -37,7 +38,7 @@ export async function POST(req: Request, { params }: Params) {
 }
 
 // DELETE /api/auth/api-key/[provider] — removes stored API key
-export async function DELETE(req: Request, { params }: Params) {
+async function DELETE__secureImpl(req: Request, { params }: Params) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -50,3 +51,7 @@ export async function DELETE(req: Request, { params }: Params) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const POST = withSecureRoute(POST__secureImpl);
+export const DELETE = withSecureRoute(DELETE__secureImpl);

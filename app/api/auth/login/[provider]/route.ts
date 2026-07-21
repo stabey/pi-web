@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ function getCallbackRegistry() {
 }
 
 // POST /api/auth/login/[provider] — frontend sends redirect URL or auth code
-export async function POST(
+async function POST__secureImpl(
   req: Request,
   { params }: { params: Promise<{ provider: string }> }
 ) {
@@ -40,7 +41,7 @@ export async function POST(
 }
 
 // GET /api/auth/login/[provider] — SSE stream for OAuth flow
-export async function GET(
+async function GET__secureImpl(
   req: Request,
   { params }: { params: Promise<{ provider: string }> }
 ) {
@@ -196,3 +197,6 @@ export async function GET(
     },
   });
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const POST = withSecureRoute(POST__secureImpl);

@@ -1,10 +1,11 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { allowFileRoot } from "@/lib/file-access";
 import { validateWorkspaceCwd } from "@/lib/server-config";
 
 // POST /api/cwd/validate  body: { cwd: string }
 // Validates a candidate coding workspace before the UI selects it.
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   try {
     const body = await req.json() as { cwd?: unknown };
     const result = validateWorkspaceCwd(body.cwd);
@@ -17,3 +18,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

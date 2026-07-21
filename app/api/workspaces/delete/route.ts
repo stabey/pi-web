@@ -1,8 +1,9 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-auth";
 import { deleteWorkspaceFolder } from "@/lib/workspace-manager";
 
-export async function DELETE(req: Request) {
+async function DELETE__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -13,3 +14,5 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
   }
 }
+
+export const DELETE = withSecureRoute(DELETE__secureImpl);

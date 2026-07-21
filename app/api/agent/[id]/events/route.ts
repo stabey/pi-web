@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { randomUUID } from "crypto";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
@@ -109,16 +110,19 @@ async function streamAgentEvents(
   });
 }
 
-export async function GET(
+async function GET__secureImpl(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   return streamAgentEvents(req, context);
 }
 
-export async function POST(
+async function POST__secureImpl(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   return streamAgentEvents(req, context);
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const POST = withSecureRoute(POST__secureImpl);

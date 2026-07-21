@@ -1,8 +1,9 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
+async function POST__secureImpl(
   _req: Request,
   { params }: { params: Promise<{ provider: string }> }
 ) {
@@ -15,3 +16,5 @@ export async function POST(
   authStorage.logout(provider);
   return Response.json({ ok: true });
 }
+
+export const POST = withSecureRoute(POST__secureImpl);

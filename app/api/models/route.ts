@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ensureChatCwd, validateKnownCwd } from "@/lib/server-config";
@@ -15,7 +16,7 @@ function compareModelEntries(
     || modelNameCollator.compare(a.id, b.id);
 }
 
-export async function GET(req: Request) {
+async function GET__secureImpl(req: Request) {
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
@@ -53,3 +54,5 @@ export async function GET(req: Request) {
 
   return Response.json({ models: Object.fromEntries(nameMap), modelList, defaultModel, thinkingLevels, thinkingLevelMaps });
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

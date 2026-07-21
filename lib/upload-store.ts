@@ -33,6 +33,13 @@ export type UploadedImage = {
   mimeType: string;
 };
 
+export type UploadedFile = {
+  type: "file";
+  name: string;
+  mimeType: string;
+  text: string;
+};
+
 export const IMAGE_MIME_ALLOWLIST = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function rootForKind(kind: UploadKind): string {
@@ -180,6 +187,18 @@ export function readAssetAsImage(assetId: string): UploadedImage {
     type: "image",
     data: bytes.toString("base64"),
     mimeType: meta.mimeType,
+  };
+}
+
+export function readAssetAsText(assetId: string): UploadedFile {
+  const { meta, bytes } = readCommittedPayload("asset", assetId);
+  // Text/code assets are validated for size and type at creation time; here we
+  // simply UTF-8 decode the stored bytes for injection into the prompt.
+  return {
+    type: "file",
+    name: meta.fileName ?? "attachment.txt",
+    mimeType: meta.mimeType ?? "text/plain",
+    text: bytes.toString("utf8"),
   };
 }
 

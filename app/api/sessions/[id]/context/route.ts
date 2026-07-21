@@ -1,8 +1,9 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
 
-export async function GET(
+async function GET__secureImpl(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -24,3 +25,5 @@ export async function GET(
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);

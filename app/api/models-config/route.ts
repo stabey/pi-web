@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
@@ -28,11 +29,11 @@ function writeModelsJson(data: Record<string, unknown>): void {
   writeFileSync(path, JSON.stringify(data, null, 2), "utf8");
 }
 
-export async function GET() {
+async function GET__secureImpl() {
   return NextResponse.json(maskModelSecrets(readModelsJson()));
 }
 
-export async function PUT(req: Request) {
+async function PUT__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -46,3 +47,6 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+export const GET = withSecureRoute(GET__secureImpl);
+export const PUT = withSecureRoute(PUT__secureImpl);

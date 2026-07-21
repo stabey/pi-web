@@ -1,3 +1,4 @@
+import { withSecureRoute } from "@/lib/crypto/server";
 import { NextResponse } from "next/server";
 import { runNpx } from "@/lib/npx";
 import { requireAdmin } from "@/lib/admin-auth";
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
 const ANSI_RE = /\x1B\[[0-9;]*m/g;
 
 // POST /api/skills/install  body: { package: string; scope: "global" | "project"; cwd?: string }
-export async function POST(req: Request) {
+async function POST__secureImpl(req: Request) {
   const unauthorized = await requireAdmin(req);
   if (unauthorized) return unauthorized;
 
@@ -44,3 +45,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: output || (err.message ?? String(e)) }, { status: 500 });
   }
 }
+
+export const POST = withSecureRoute(POST__secureImpl);
